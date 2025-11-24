@@ -1,0 +1,21 @@
+dataset:
+
+  small:
+    articles: "dataset/ebnerd_small/articles.parquet"
+
+    train:
+      behaviors: "dataset/ebnerd_small/train/behaviors.parquet"
+      history: "dataset/ebnerd_small/train/history.parquet"
+    validation:
+      behaviors: "dataset/ebnerd_small/validation/behaviors.parquet"
+      history: "dataset/ebnerd_small/validation/history.parquet"
+
+  large:
+    articles: "dataset/ebnerd_large/articles.parquet"
+
+    train:
+      behaviors: "dataset/ebnerd_large/train/behaviors.parquet"
+      history: "dataset/ebnerd_large/train/history.parquet"
+    validation:
+      behaviors: "dataset/ebnerd_large/validation/behaviors.parquet"
+      history: "dataset/ebnerd_large/validation/history.parquet"
