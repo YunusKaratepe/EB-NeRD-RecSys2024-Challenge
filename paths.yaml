@@ -19,3 +19,6 @@ dataset:
     validation:
       behaviors: "dataset/ebnerd_large/validation/behaviors.parquet"
       history: "dataset/ebnerd_large/validation/history.parquet"
+
+features: "feature-extraction/output/features"
+  
