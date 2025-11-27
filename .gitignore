@@ -1,6 +1,5 @@
 dataset-zips/
 ebnerd_large/
 ebnerd_small/
-recsys-challenge-2024-1st-place-master
 *.parquet
 *.zip
