@@ -7,6 +7,7 @@ user・sessionごとに、過去・未来それぞれでのカウントを行う
 import itertools
 import os
 import sys
+import gc
 from pathlib import Path
 
 import hydra
@@ -65,11 +66,17 @@ def process_df(cfg, behaviors_df):
             "scroll_percentage",
         ]
     )
+    
+    print(f"Exploding {len(behaviors_df)} rows...")
     explode_df = (
         behaviors_df.explode("article_ids_inview")
         .rename({"article_ids_inview": "article_id"})
         .with_row_index(name="order")
     )  # 後で戻せるように番号付与
+    
+    # Clear the original dataframe to free memory
+    del behaviors_df
+    gc.collect()
 
     # ソートして後で使うカラムを付与
     explode_df = explode_df.sort(["impression_time"]).with_columns(
@@ -168,6 +175,7 @@ def process_df(cfg, behaviors_df):
         )
 
     # 同一 impression 内での割合,rankを求める
+    print("Calculating ratios and ranks...")
     for col in BASE_COLUMNS:
         explode_df = explode_df.with_columns(
             [
@@ -181,6 +189,8 @@ def process_df(cfg, behaviors_df):
                 .alias(f"{col}_rank_descending"),
             ]
         )
+        gc.collect()  # Clear memory after each column calculation
+    
     explode_df = explode_df.sort(["order"])
     return explode_df
 
@@ -200,6 +210,11 @@ def create_feature(cfg: DictConfig, output_path):
         df.write_parquet(
             output_path / f"{data_name}_feat.parquet",
         )
+        
+        # Clear memory after each dataset
+        del behaviors_df, df
+        gc.collect()
+        print(f"Finished {data_name}, memory cleared")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

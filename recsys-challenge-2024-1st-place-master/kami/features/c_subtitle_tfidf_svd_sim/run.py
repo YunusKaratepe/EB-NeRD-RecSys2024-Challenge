@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 from pathlib import Path
@@ -63,12 +64,30 @@ def process_df(cfg, article_embeddings, articles_df, history_df, candidate_df):
 
     # 要素積の合計を類似度とする（consin similarity）
     print(f"{article_embeddings.shape=}, {user_embeddings.shape=}")
-    similarity = np.asarray(
-        (
-            article_embeddings[candidate_df["article_rn"].to_list()]
-            * user_embeddings[candidate_df["user_rn"].to_list()]
-        ).sum(axis=1)
-    ).flatten()
+    
+    # Process candidates in chunks to avoid memory issues
+    chunk_size = 1_000_000
+    total_rows = len(candidate_df)
+    similarity_chunks = []
+    
+    for start_idx in tqdm(range(0, total_rows, chunk_size), desc="Processing chunks"):
+        end_idx = min(start_idx + chunk_size, total_rows)
+        chunk_df = candidate_df[start_idx:end_idx]
+        
+        chunk_similarity = np.asarray(
+            (
+                article_embeddings[chunk_df["article_rn"].to_list()]
+                * user_embeddings[chunk_df["user_rn"].to_list()]
+            ).sum(axis=1)
+        ).flatten()
+        
+        similarity_chunks.append(chunk_similarity)
+        del chunk_similarity
+        gc.collect()
+    
+    similarity = np.concatenate(similarity_chunks)
+    del similarity_chunks
+    gc.collect()
 
     df = (
         candidate_df.with_columns(
@@ -114,6 +133,11 @@ def create_feature(cfg: DictConfig, output_path):
         df.write_parquet(
             output_path / f"{data_name}_feat.parquet",
         )
+        
+        # Clean up memory
+        del history_df, candidate_df, df
+        gc.collect()
+        print(f"Finished {data_name}, memory cleared")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

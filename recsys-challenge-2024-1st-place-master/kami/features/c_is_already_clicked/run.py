@@ -5,6 +5,7 @@
 import itertools
 import os
 import sys
+import gc
 from pathlib import Path
 
 import hydra
@@ -20,18 +21,41 @@ PREFIX = "c"
 USE_COLUMNS = ["is_already_clicked"]
 
 
-def process_df(cfg, history_df, candidate_df):
-    candidate_df = candidate_df.join(
-        history_df.select(["user_id", "article_id_fixed"]),
-        on="user_id",
-        how="left",
-    )
+def process_df(cfg, history_df, candidate_df, chunk_size=1000000):
+    total_rows = len(candidate_df)
+    all_chunks = []
+    
+    history_selected = history_df.select(["user_id", "article_id_fixed"])
+    
+    print(f"Processing {total_rows} candidates in chunks of {chunk_size}")
+    for start_idx in range(0, total_rows, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_rows)
+        print(f"Processing chunk {start_idx} to {end_idx}")
+        
+        chunk_candidate = candidate_df[start_idx:end_idx]
+        
+        chunk_df = chunk_candidate.join(
+            history_selected,
+            on="user_id",
+            how="left",
+        )
 
-    df = candidate_df.with_columns(
-        pl.col("article_id")
-        .is_in(pl.col("article_id_fixed"))
-        .alias("is_already_clicked")
-    )
+        chunk_df = chunk_df.with_columns(
+            pl.col("article_id")
+            .is_in(pl.col("article_id_fixed"))
+            .alias("is_already_clicked")
+        ).select(["is_already_clicked"])
+        
+        all_chunks.append(chunk_df)
+        
+        del chunk_candidate, chunk_df
+        gc.collect()
+    
+    print("Combining chunks...")
+    df = pl.concat(all_chunks)
+    del all_chunks
+    gc.collect()
+    
     return df
 
 
@@ -47,13 +71,18 @@ def create_feature(cfg: DictConfig, output_path):
             Path(cfg.dir.candidate_dir) / size_name / f"{data_name}_candidate.parquet"
         )
 
-        df = process_df(cfg, history_df, candidate_df).select(USE_COLUMNS)
+        df = process_df(cfg, history_df, candidate_df)
 
         df = df.rename({col: f"{PREFIX}_{col}" for col in USE_COLUMNS})
         print(f"df shape: {df.shape}, columns: {df.columns}")
         df.write_parquet(
             output_path / f"{data_name}_feat.parquet",
         )
+        
+        # Clear memory after each dataset
+        del history_df, candidate_df, df
+        gc.collect()
+        print(f"Finished {data_name}, memory cleared")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

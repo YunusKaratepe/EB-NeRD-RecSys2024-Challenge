@@ -1,6 +1,7 @@
 import itertools
 import os
 import sys
+import gc
 from pathlib import Path
 
 import hydra
@@ -32,34 +33,69 @@ USE_COLUMNS = list(
 )
 
 
-def process_df(cfg, articles_df, history_df):
-    explode_df = (
-        history_df.select("article_id_fixed", "user_id")
-        .explode(
-            [
-                "article_id_fixed",
-            ]
+def process_df(cfg, articles_df, history_df, chunk_size=50000):
+    # Process history in chunks to reduce memory usage
+    total_rows = len(history_df)
+    all_counts = {cat_col: {} for cat_col in cat_cols}
+    
+    print(f"Processing {total_rows} rows in chunks of {chunk_size}")
+    
+    for start_idx in range(0, total_rows, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_rows)
+        print(f"Processing chunk {start_idx} to {end_idx}")
+        
+        chunk_df = history_df[start_idx:end_idx]
+        
+        explode_df = (
+            chunk_df.select("article_id_fixed", "user_id")
+            .explode(
+                [
+                    "article_id_fixed",
+                ]
+            )
+            .with_columns(
+                pl.col("article_id_fixed").alias("article_id"),
+            )
         )
-        .with_columns(
-            pl.col("article_id_fixed").alias("article_id"),
-        )
-    )
 
-    explode_df = explode_df.join(
-        articles_df.select(["article_id"] + cat_cols),
-        on="article_id",
-        how="left",
-    )
+        explode_df = explode_df.join(
+            articles_df.select(["article_id"] + cat_cols),
+            on="article_id",
+            how="left",
+        )
+        
+        # Accumulate counts for each category (with exploded multi-value fields)
+        for cat_col in cat_cols:
+            chunk_exploded = explode_df.select([cat_col]).explode(cat_col)
+            chunk_counts = chunk_exploded[cat_col].value_counts()
+            for row in chunk_counts.iter_rows():
+                cat_value = row[0]
+                count = row[1]
+                if cat_value is not None:  # Skip null values
+                    all_counts[cat_col][cat_value] = all_counts[cat_col].get(cat_value, 0) + count
+        
+        # Clear memory
+        del explode_df, chunk_df
+        gc.collect()
 
     base_df = articles_df.select(["article_id"] + cat_cols)
 
     # category, article_type, sentiment_label, premium ごとの click count の割合を求める
     for cat_col in cat_cols:
         print(f"processing {cat_col}")
+        
+        # Convert accumulated counts to DataFrame
+        count_data = list(all_counts[cat_col].items())
+        if len(count_data) == 0:
+            continue
+            
+        count_df = pl.DataFrame({
+            cat_col: [item[0] for item in count_data],
+            "count": [item[1] for item in count_data]
+        })
+        
         count_df = (
-            explode_df.select([cat_col])
-            .explode(cat_col)[cat_col]
-            .value_counts()
+            count_df
             .with_columns(
                 # ratioにする
                 (pl.col("count") / pl.col("count").sum()).alias(
@@ -68,6 +104,7 @@ def process_df(cfg, articles_df, history_df):
             )
             .drop("count")
         )
+        
         df = (
             articles_df.select(["article_id"] + [cat_col])
             .explode(cat_col)
@@ -95,6 +132,10 @@ def process_df(cfg, articles_df, history_df):
             )
         )
         base_df = base_df.join(df, on="article_id", how="left")
+        
+        # Clear intermediate results
+        del count_df, df
+        gc.collect()
 
     return base_df
 
@@ -116,6 +157,11 @@ def create_feature(cfg: DictConfig, output_path):
         df.write_parquet(
             output_path / f"{data_name}_feat.parquet",
         )
+        
+        # Clear memory after each dataset
+        del history_df, df
+        gc.collect()
+        print(f"Finished {data_name}, memory cleared")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

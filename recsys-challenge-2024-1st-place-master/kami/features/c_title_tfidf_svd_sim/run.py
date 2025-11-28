@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 from pathlib import Path
 
 import hydra
@@ -62,13 +63,35 @@ def process_df(cfg, article_embeddings, articles_df, history_df, candidate_df):
     )
 
     # 要素積の合計を類似度とする（consin similarity）
+    # Process in chunks to avoid huge array allocation
     print(f"{article_embeddings.shape=}, {user_embeddings.shape=}")
-    similarity = np.asarray(
-        (
-            article_embeddings[candidate_df["article_rn"].to_list()]
-            * user_embeddings[candidate_df["user_rn"].to_list()]
-        ).sum(axis=1)
-    ).flatten()
+    total_rows = len(candidate_df)
+    chunk_size = 1000000
+    all_similarities = []
+    
+    print(f"Processing {total_rows} candidates in chunks of {chunk_size}")
+    for start_idx in range(0, total_rows, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_rows)
+        print(f"Processing chunk {start_idx} to {end_idx}")
+        
+        chunk_article_rn = candidate_df["article_rn"][start_idx:end_idx].to_list()
+        chunk_user_rn = candidate_df["user_rn"][start_idx:end_idx].to_list()
+        
+        chunk_similarity = np.asarray(
+            (
+                article_embeddings[chunk_article_rn]
+                * user_embeddings[chunk_user_rn]
+            ).sum(axis=1)
+        ).flatten()
+        
+        all_similarities.append(chunk_similarity)
+        
+        del chunk_article_rn, chunk_user_rn, chunk_similarity
+        gc.collect()
+    
+    similarity = np.concatenate(all_similarities)
+    del all_similarities
+    gc.collect()
 
     df = (
         candidate_df.with_columns(
@@ -114,6 +137,11 @@ def create_feature(cfg: DictConfig, output_path):
         df.write_parquet(
             output_path / f"{data_name}_feat.parquet",
         )
+        
+        # Clear memory after each dataset
+        del history_df, candidate_df, df
+        gc.collect()
+        print(f"Finished {data_name}, memory cleared")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

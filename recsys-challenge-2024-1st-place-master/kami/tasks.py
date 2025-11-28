@@ -6,7 +6,7 @@ from invoke import task
 def create_candidates(ctx, debug=False):
     # Skip test_demo - only needed for test set predictions
     # ctx.run("python preprocess/test_demo/run.py")
-    scripts = [        
+    scripts = [
         "preprocess/make_candidate/run.py"
     ]
     for script in scripts:
@@ -25,27 +25,27 @@ def create_features(ctx, debug=False):
         # "features/a_base/run.py",
         # "features/a_click_ranking/run.py",
         # "features/a_additional_feature/run.py",
-        "features/a_click_ratio/run.py",
-        "features/a_click_ratio_multi/run.py",
-        "features/i_base_feat/run.py",
-        "features/i_stat_feat/run.py",
-        "features/i_viewtime_diff/run.py",
-        "features/i_article_stat_v2/run.py",
-        "features/u_stat_history/run.py",
-        "features/u_click_article_stat_v2/run.py",
-        "features/y_transition_prob_from_first/run.py",
-        "features/c_appear_imp_count_v7/run.py",
-        "features/c_appear_imp_count_read_time_per_inview_v7/run.py",
-        "features/c_topics_sim_count_svd/run.py",
-        "features/c_title_tfidf_svd_sim/run.py",
-        "features/c_subtitle_tfidf_svd_sim/run.py",
-        "features/c_body_tfidf_svd_sim/run.py",
-        "features/c_category_tfidf_sim/run.py",
-        "features/c_subcategory_tfidf_sim/run.py",
-        "features/c_entity_groups_tfidf_sim/run.py",
-        "features/c_ner_clusters_tfidf_sim/run.py",
-        "features/c_article_publish_time_v5/run.py",
-        "features/c_is_already_clicked/run.py",
+        # "features/a_click_ratio/run.py",
+        # "features/a_click_ratio_multi/run.py",
+        # "features/i_base_feat/run.py",
+        # "features/i_stat_feat/run.py",
+        # "features/i_viewtime_diff/run.py",
+        # "features/i_article_stat_v2/run.py",
+        # "features/u_stat_history/run.py",
+        # "features/u_click_article_stat_v2/run.py",
+        # "features/y_transition_prob_from_first/run.py",
+        # "features/c_appear_imp_count_v7/run.py",                          # problematic
+        # "features/c_appear_imp_count_read_time_per_inview_v7/run.py",     # problematic
+        # "features/c_topics_sim_count_svd/run.py",
+        # "features/c_title_tfidf_svd_sim/run.py",
+        # "features/c_subtitle_tfidf_svd_sim/run.py",
+        # "features/c_body_tfidf_svd_sim/run.py",
+        # "features/c_category_tfidf_sim/run.py",
+        # "features/c_subcategory_tfidf_sim/run.py",
+        # "features/c_entity_groups_tfidf_sim/run.py",
+        # "features/c_ner_clusters_tfidf_sim/run.py",
+        # "features/c_article_publish_time_v5/run.py",
+        # "features/c_is_already_clicked/run.py",
     ]
 
     for script in scripts:

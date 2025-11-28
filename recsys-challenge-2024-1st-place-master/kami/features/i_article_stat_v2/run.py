@@ -1,6 +1,7 @@
 import itertools
 import os
 import sys
+import gc
 from pathlib import Path
 
 import hydra
@@ -33,48 +34,71 @@ USE_COLUMNS = [
 ]
 
 
-def process_df(cfg, behaviors_df, articles_df):
-    candidate_df = (
-        behaviors_df.select(
-            ["impression_id", "article_ids_inview", "user_id", "impression_time"]
+def process_df(cfg, behaviors_df, articles_df, chunk_size=100000):
+    total_rows = len(behaviors_df)
+    all_chunks = []
+    
+    print(f"Processing {total_rows} rows in chunks of {chunk_size}")
+    
+    for start_idx in range(0, total_rows, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_rows)
+        print(f"Processing chunk {start_idx} to {end_idx}")
+        
+        chunk_behaviors = behaviors_df[start_idx:end_idx]
+        
+        candidate_df = (
+            chunk_behaviors.select(
+                ["impression_id", "article_ids_inview", "user_id", "impression_time"]
+            )
+            .explode("article_ids_inview")
+            .rename({"article_ids_inview": "article_id"})
         )
-        .explode("article_ids_inview")
-        .rename({"article_ids_inview": "article_id"})
-    )
 
-    candidate_df = candidate_df.join(
-        articles_df,
-        on="article_id",
-        how="left",
-    )
+        candidate_df = candidate_df.join(
+            articles_df,
+            on="article_id",
+            how="left",
+        )
 
-    # published_time と time の差分を特徴量として追加
-    candidate_df = candidate_df.with_columns(
-        (pl.col("impression_time") - pl.col("published_time"))
-        .dt.total_minutes()
-        .alias("time_min_diff")
-    )
+        # published_time と time の差分を特徴量として追加
+        candidate_df = candidate_df.with_columns(
+            (pl.col("impression_time") - pl.col("published_time"))
+            .dt.total_minutes()
+            .alias("time_min_diff")
+        )
 
-    # impression_id で集約
-    df = candidate_df.group_by(["impression_id", "user_id"]).agg(
-        list(
-            itertools.chain(
-                *[
-                    [
-                        pl.mean(col).alias(f"{col}_mean"),
-                        pl.std(col).alias(f"{col}_std"),
+        # impression_id で集約
+        chunk_df = candidate_df.group_by(["impression_id", "user_id"]).agg(
+            list(
+                itertools.chain(
+                    *[
+                        [
+                            pl.mean(col).alias(f"{col}_mean"),
+                            pl.std(col).alias(f"{col}_std"),
+                        ]
+                        for col in [
+                            "time_min_diff",
+                            "total_inviews",
+                            "total_pageviews",
+                            "total_read_time",
+                            "sentiment_score",
+                        ]
                     ]
-                    for col in [
-                        "time_min_diff",
-                        "total_inviews",
-                        "total_pageviews",
-                        "total_read_time",
-                        "sentiment_score",
-                    ]
-                ]
+                )
             )
         )
-    )
+        
+        all_chunks.append(chunk_df)
+        
+        # Clear memory
+        del candidate_df, chunk_behaviors, chunk_df
+        gc.collect()
+    
+    # Combine all chunks
+    print("Combining all chunks...")
+    df = pl.concat(all_chunks)
+    del all_chunks
+    gc.collect()
 
     return df
 
@@ -98,6 +122,11 @@ def create_feature(cfg: DictConfig, output_path):
         df.write_parquet(
             output_path / f"{data_name}_feat.parquet",
         )
+        
+        # Clear memory after each dataset
+        del behaviors_df, df
+        gc.collect()
+        print(f"Finished {data_name}, memory cleared")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
