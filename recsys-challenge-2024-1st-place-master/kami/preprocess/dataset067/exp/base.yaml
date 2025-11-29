@@ -24,8 +24,8 @@ features:
   'y': 
     - ${exp.base_path}/features/y_transition_prob_from_first
   c:
-    # - ${exp.base_path}/features/c_appear_imp_count_v7 # v4から変更 # SKIPPED: Memory issues
-    # - ${exp.base_path}/features/c_appear_imp_count_read_time_per_inview_v7 # SKIPPED: Memory issues
+    - ${exp.base_path}/features/c_appear_imp_count_v7 # v4から変更 # SKIPPED: Memory issues
+    - ${exp.base_path}/features/c_appear_imp_count_read_time_per_inview_v7 # SKIPPED: Memory issues
     - ${exp.base_path}/features/c_topics_sim_count_svd
     - ${exp.base_path}/features/c_title_tfidf_svd_sim
     - ${exp.base_path}/features/c_subtitle_tfidf_svd_sim
