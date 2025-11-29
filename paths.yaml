@@ -20,9 +20,5 @@ dataset:
       behaviors: "dataset/ebnerd_large/validation/behaviors.parquet"
       history: "dataset/ebnerd_large/validation/history.parquet"
 
-<<<<<<< HEAD:paths.yaml
 features: "feature-extraction/output/features"
-=======
-features-base: "feature-extraction/features"
->>>>>>> 6c8a76efdf623aba83058a50605f3d98c648c801:path.yaml
   
