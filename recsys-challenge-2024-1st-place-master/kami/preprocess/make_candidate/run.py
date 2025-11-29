@@ -22,6 +22,12 @@ def make_candidate(cfg: DictConfig, data_name: str = "train"):
 
     # 候補作成
     behaviors_df = pl.read_parquet(data_dirs[data_name] / "behaviors.parquet")
+    
+    # Sample data if fraction is set (for memory-constrained systems)
+    if hasattr(cfg.exp, 'sample_fraction') and cfg.exp.sample_fraction < 1.0:
+        original_size = len(behaviors_df)
+        behaviors_df = behaviors_df.sample(fraction=cfg.exp.sample_fraction, seed=cfg.exp.seed)
+        print(f"Sampled {len(behaviors_df):,} rows from {original_size:,} ({cfg.exp.sample_fraction*100:.1f}%)")
     if data_name == "test":
         behaviors_df = behaviors_df.with_columns(
             pl.lit([1]).alias("article_ids_clicked")

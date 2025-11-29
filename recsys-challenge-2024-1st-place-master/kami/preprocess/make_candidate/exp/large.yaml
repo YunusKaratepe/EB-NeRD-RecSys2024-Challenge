@@ -2,3 +2,4 @@ defaults:
   - base@_here_ # ベースの設定ファイルを指定する
 
 size_name: large
+sample_fraction: 0.25  # Use 25% of data to fit in 32GB RAM (change to 0.5 for 50%, 1.0 for full)
