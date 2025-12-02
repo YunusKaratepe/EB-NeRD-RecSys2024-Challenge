@@ -1,6 +1,8 @@
 """
-1st: trainで学習、validationで評価、testで予測
-2nd: validationで学習、testで予測 (1stのイテレーション数を使う)
+Single-stage training:
+- Train on train dataset only
+- Validate on first 50% of validation dataset (for early stopping)
+- Test on second 50% of validation dataset (held-out test set)
 """
 
 import gc
@@ -191,63 +193,6 @@ def train_and_valid(
     return bst
 
 
-def train_only(cfg: DictConfig, train_df: pl.DataFrame, iteration: int) -> lgb.Booster:
-    unuse_cols = cfg.exp.lgbm.unuse_cols
-    feature_cols = [col for col in train_df.columns if col not in unuse_cols]
-    label_col = cfg.exp.lgbm.label_col
-
-    if cfg.exp.lgbm.params.two_rounds:
-        # bool特徴をintに変換
-        bool_cols = [
-            col
-            for col in [label_col] + feature_cols
-            if train_df[col].dtype == pl.Boolean
-        ]
-        train_df = train_df.with_columns(
-            [train_df[col].cast(pl.Int8) for col in bool_cols]
-        )
-        # テキストファイルへ書き出し
-        train_df[[label_col] + feature_cols].write_csv(
-            "tmp_train.csv", include_header=False
-        )
-    print("make lgb.Dataset")
-    lgb_train_dataset = lgb.Dataset(
-        "tmp_train.csv"
-        if cfg.exp.lgbm.params.two_rounds
-        else train_df[feature_cols].to_numpy().astype(np.float32),
-        label=np.array(train_df[label_col]),
-        feature_name=feature_cols,
-    )
-
-    if cfg.exp.lgbm.params.objective == "lambdarank":
-        print("make train group")
-        train_group = (
-            train_df.select(group_cols)
-            .group_by(group_cols, maintain_order=True)
-            .len()["len"]
-            .to_list()
-        )
-        print("set group")
-        lgb_train_dataset.set_group(train_group)
-        cfg.exp.lgbm.params["ndcg_eval_at"] = cfg.exp.lgbm.ndcg_eval_at
-
-    print("train")
-    bst = lgb.train(
-        OmegaConf.to_container(cfg.exp.lgbm.params, resolve=True),
-        lgb_train_dataset,
-        num_boost_round=iteration,
-        valid_sets=[lgb_train_dataset],
-        valid_names=["train"],
-        callbacks=[
-            lgb.log_evaluation(cfg.exp.lgbm.verbose_eval),
-        ],
-    )
-    logger.info(
-        f"best_itelation: {bst.best_iteration}, train: {bst.best_score['train']}, valid: {bst.best_score['valid']}"
-    )
-    return bst
-
-
 def predict(
     cfg: DictConfig, bst: lgb.Booster, test_df: pd.DataFrame, num_iteration: int
 ) -> pd.DataFrame:
@@ -267,13 +212,14 @@ def save_model(cfg: DictConfig, bst: lgb.Booster, output_path: Path, name: int) 
     with open(output_path / f"model_dict_{name}.pkl", "wb") as f:
         pickle.dump({"model": bst}, f)
 
-    # save feature importance
+    # save feature importance (top 100)
     fig, ax = plt.subplots(figsize=(10, 20))
     ax = lgb.plot_importance(bst, importance_type="gain", ax=ax, max_num_features=100)
     fig.tight_layout()
     fig.savefig(output_path / f"importance_{name}.png")
+    plt.close(fig)
 
-    # importance を log に出力
+    # Get importance dataframe
     importance_df = pd.DataFrame(
         {
             "feature": bst.feature_name(),
@@ -281,7 +227,28 @@ def save_model(cfg: DictConfig, bst: lgb.Booster, output_path: Path, name: int) 
         }
     )
     importance_df = importance_df.sort_values("importance", ascending=False)
-    # 省略せずに表示
+    
+    # Save top 20 most important features
+    fig_top, ax_top = plt.subplots(figsize=(10, 8))
+    top_20 = importance_df.head(20).sort_values("importance", ascending=True)
+    ax_top.barh(top_20["feature"], top_20["importance"])
+    ax_top.set_xlabel("Importance (gain)")
+    ax_top.set_title(f"Top 20 Most Important Features - {name}")
+    fig_top.tight_layout()
+    fig_top.savefig(output_path / f"importance_top20_{name}.png")
+    plt.close(fig_top)
+    
+    # Save bottom 20 least important features
+    fig_bottom, ax_bottom = plt.subplots(figsize=(10, 8))
+    bottom_20 = importance_df.tail(20).sort_values("importance", ascending=True)
+    ax_bottom.barh(bottom_20["feature"], bottom_20["importance"])
+    ax_bottom.set_xlabel("Importance (gain)")
+    ax_bottom.set_title(f"Bottom 20 Least Important Features - {name}")
+    fig_bottom.tight_layout()
+    fig_bottom.savefig(output_path / f"importance_bottom20_{name}.png")
+    plt.close(fig_bottom)
+
+    # Log importance to console
     pd.set_option("display.max_rows", None)
     logger.info(importance_df)
     logger.info(importance_df["feature"].to_list())
@@ -304,8 +271,8 @@ def make_result_df(df: pl.DataFrame, pred: np.ndarray):
     )
 
 
-def first_stage(cfg: DictConfig, output_path) -> None:
-    print("first_stage")
+def main_stage(cfg: DictConfig, output_path) -> None:
+    print("main_stage")
     dataset_path = Path(cfg.exp.dataset_path)
 
     size_name = cfg.exp.size_name
@@ -330,94 +297,145 @@ def first_stage(cfg: DictConfig, output_path) -> None:
                 )
                 print(f"{train_df.shape=}")
                 gc.collect()
-            validation_df = pl.read_parquet(
+            full_validation_df = pl.read_parquet(
                 str(dataset_path / size_name / "validation_dataset.parquet"),
                 
             )
+            
+            # Split validation into validation and test (50/50)
+            print(f"Original validation shape: {full_validation_df.shape}")
+            random.seed(cfg.exp.seed)
+            all_validation_impression_ids = sorted(
+                full_validation_df["impression_id"].unique().to_list()
+            )
+            
             if cfg.exp.sampling_rate:
-                # validation
-                print(f"{validation_df.shape=}")
-                random.seed(cfg.exp.seed)
-                validation_impression_ids = sorted(
-                    validation_df["impression_id"].unique().to_list()
+                all_validation_impression_ids = random.sample(
+                    all_validation_impression_ids,
+                    int(len(all_validation_impression_ids) * cfg.exp.sampling_rate),
                 )
-                use_validation_impression_ids = random.sample(
-                    validation_impression_ids,
-                    int(len(validation_impression_ids) * cfg.exp.sampling_rate),
-                )
-                validation_df = validation_df.filter(
-                    pl.col("impression_id").is_in(use_validation_impression_ids)
-                )
-                print(f"{validation_df.shape=}")
-                gc.collect()
+            
+            # Split 50/50
+            split_idx = len(all_validation_impression_ids) // 2
+            validation_impression_ids = all_validation_impression_ids[:split_idx]
+            test_impression_ids = all_validation_impression_ids[split_idx:]
+            
+            validation_df = full_validation_df.filter(
+                pl.col("impression_id").is_in(validation_impression_ids)
+            )
+            test_df = full_validation_df.filter(
+                pl.col("impression_id").is_in(test_impression_ids)
+            )
+            
+            print(f"Validation split shape: {validation_df.shape}")
+            print(f"Test split shape: {test_df.shape}")
+            del full_validation_df
+            gc.collect()
 
             train_df = process_df(cfg, train_df)
             gc.collect()
             validation_df = process_df(cfg, validation_df)
             gc.collect()
+            test_df = process_df(cfg, test_df)
+            gc.collect()
 
         with utils.trace("train and valid"):
             bst = train_and_valid(cfg, train_df, validation_df)
-            save_model(cfg, bst, output_path, name="first_stage")
+            save_model(cfg, bst, output_path, name="model")
 
         del train_df, validation_df
         gc.collect()
 
     if "predict" in cfg.exp.first_modes:
         bst = None
-        with open(output_path / "model_dict_first_stage.pkl", "rb") as f:
+        with open(output_path / "model_dict_model.pkl", "rb") as f:
             bst = pickle.load(f)["model"]
 
-        with utils.trace("predict validation"):
-            validation_df = pl.read_parquet(
+        with utils.trace("predict validation and test"):
+            # Recreate the same split
+            full_validation_df = pl.read_parquet(
                 str(dataset_path / size_name / "validation_dataset.parquet"),
-                
             )
+            
+            random.seed(cfg.exp.seed)
+            all_validation_impression_ids = sorted(
+                full_validation_df["impression_id"].unique().to_list()
+            )
+            if cfg.exp.sampling_rate:
+                all_validation_impression_ids = random.sample(
+                    all_validation_impression_ids,
+                    int(len(all_validation_impression_ids) * cfg.exp.sampling_rate),
+                )
+            split_idx = len(all_validation_impression_ids) // 2
+            validation_impression_ids = all_validation_impression_ids[:split_idx]
+            test_impression_ids = all_validation_impression_ids[split_idx:]
+            
+            validation_df = full_validation_df.filter(
+                pl.col("impression_id").is_in(validation_impression_ids)
+            )
+            test_df = full_validation_df.filter(
+                pl.col("impression_id").is_in(test_impression_ids)
+            )
+            del full_validation_df
+            
             validation_df = process_df(cfg, validation_df)
             y_valid_pred = predict(
                 cfg, bst, validation_df, num_iteration=bst.best_iteration
             )
             validation_result_df = make_result_df(validation_df, y_valid_pred)
             validation_result_df.write_parquet(
-                output_path / "validation_result_first.parquet"
+                output_path / "validation_result.parquet"
             )
-            print(f"{validation_result_df}")
+            print(f"Validation: {validation_result_df}")
             del validation_df, validation_result_df
             gc.collect()
-        with utils.trace("predict test"):
-            test_df = pl.read_parquet(
-                str(dataset_path / size_name / "test_dataset.parquet"),
-                
-            )
-            print(test_df.shape)
+            
             test_df = process_df(cfg, test_df)
-            y_pred = predict(cfg, bst, test_df, num_iteration=bst.best_iteration)
-            test_result_df = make_result_df(test_df, y_pred)
-            test_result_df.write_parquet(output_path / "test_result_first.parquet")
-
-            print(f"test_result_df shape: {test_result_df.shape}, columns: {test_result_df.columns}")
-            impression_ids = test_result_df["impression_id"].to_list()
-            prediction_scores = test_result_df["rank"].to_list()
-            write_submission_file(
-                impression_ids=impression_ids,
-                prediction_scores=prediction_scores,
-                path=output_path / "predictions.txt",
-                filename_zip=f"predictions_{size_name}.zip",
-            )
+            y_test_pred = predict(cfg, bst, test_df, num_iteration=bst.best_iteration)
+            test_result_df = make_result_df(test_df, y_test_pred)
+            test_result_df.write_parquet(output_path / "test_result.parquet")
+            print(f"Test: {test_result_df}")
             del test_df, test_result_df
             gc.collect()
 
     if "eval" in cfg.exp.first_modes:
         with utils.trace("load datasets"):
-            validation_df = pl.read_parquet(
+            # Recreate the same split
+            full_validation_df = pl.read_parquet(
                 str(dataset_path / size_name / "validation_dataset.parquet"),
-                
             )
+            
+            random.seed(cfg.exp.seed)
+            all_validation_impression_ids = sorted(
+                full_validation_df["impression_id"].unique().to_list()
+            )
+            if cfg.exp.sampling_rate:
+                all_validation_impression_ids = random.sample(
+                    all_validation_impression_ids,
+                    int(len(all_validation_impression_ids) * cfg.exp.sampling_rate),
+                )
+            split_idx = len(all_validation_impression_ids) // 2
+            validation_impression_ids = all_validation_impression_ids[:split_idx]
+            test_impression_ids = all_validation_impression_ids[split_idx:]
+            
+            validation_df = full_validation_df.filter(
+                pl.col("impression_id").is_in(validation_impression_ids)
+            )
+            test_df = full_validation_df.filter(
+                pl.col("impression_id").is_in(test_impression_ids)
+            )
+            del full_validation_df
+            
             validation_df = process_df(cfg, validation_df)
+            test_df = process_df(cfg, test_df)
+            
             validation_result_df = pl.read_parquet(
-                output_path / "validation_result_first.parquet",
-                
+                output_path / "validation_result.parquet",
             )
+            test_result_df = pl.read_parquet(
+                output_path / "test_result.parquet",
+            )
+            
         with utils.trace("prepare eval validation"):
             labels = (
                 validation_df.select(["impression_id", "user_id", "label"])
@@ -430,10 +448,7 @@ def first_stage(cfg: DictConfig, output_path) -> None:
             )["rank"].to_list()
 
         with utils.trace("eval validation"):
-            metric_functions = []
-            if cfg.exp.use_auc:
-                metric_functions = [AucScore()]
-            metric_functions += [NdcgScore(k=10)]
+            metric_functions = [AucScore(), NdcgScore(k=5), NdcgScore(k=10), MrrScore()]
 
             metrics = MetricEvaluator(
                 labels=labels,
@@ -441,170 +456,35 @@ def first_stage(cfg: DictConfig, output_path) -> None:
                 metric_functions=metric_functions,
             )
             metrics.evaluate()
-            result_dict = metrics.evaluations
+            val_result_dict = metrics.evaluations
 
-            logger.info(result_dict)
-            wandb.log(result_dict)
-
-
-def second_stage(cfg: DictConfig, output_path) -> None:
-    print("second_stage")
-    dataset_path = Path(cfg.exp.dataset_path)
-    size_name = cfg.exp.size_name
-
-    if "train" in cfg.exp.second_modes:
-        with utils.trace("load datasets"):
-            validation_df = pl.read_parquet(
-                str(dataset_path / size_name / "validation_dataset.parquet"),
-                
+            logger.info(f"VALIDATION: {val_result_dict}")
+            wandb.log({"val_" + k: v for k, v in val_result_dict.items()})
+        
+        with utils.trace("prepare eval test"):
+            test_labels = (
+                test_df.select(["impression_id", "user_id", "label"])
+                .group_by(["impression_id", "user_id"], maintain_order=True)
+                .agg(pl.col("label").cast(pl.Int32))["label"]
+                .to_list()
             )
-            if cfg.exp.sampling_rate:
-                random.seed(cfg.exp.seed)
-                validation_impression_ids = sorted(
-                    validation_df["impression_id"].unique().to_list()
-                )
-                use_validation_impression_ids = random.sample(
-                    validation_impression_ids,
-                    int(len(validation_impression_ids) * cfg.exp.sampling_rate),
-                )
-                validation_df = validation_df.filter(
-                    pl.col("impression_id").is_in(use_validation_impression_ids)
-                )
-                gc.collect()
-            validation_df = process_df(cfg, validation_df)
+            test_predictions = test_result_df.with_columns(
+                pl.col("rank").list.eval(1 / pl.element())
+            )["rank"].to_list()
 
-        with utils.trace("train only"):
-            first_bst = None
-            with open(output_path / "model_dict_first_stage.pkl", "rb") as f:
-                first_bst = pickle.load(f)["model"]
-            iteration = first_bst.best_iteration
-            bst = train_only(cfg, validation_df, iteration)
-            save_model(cfg, bst, output_path, name="second_stage")
+        with utils.trace("eval test"):
+            metric_functions = [AucScore(), NdcgScore(k=5), NdcgScore(k=10), MrrScore()]
 
-        del validation_df
-        gc.collect()
-
-    if "predict" in cfg.exp.second_modes:
-        first_bst = None
-        with open(output_path / "model_dict_first_stage.pkl", "rb") as f:
-            first_bst = pickle.load(f)["model"]
-        iteration = first_bst.best_iteration
-        bst = None
-        with open(output_path / "model_dict_second_stage.pkl", "rb") as f:
-            bst = pickle.load(f)["model"]
-
-        with utils.trace("predict test"):
-            test_df = pl.read_parquet(
-                str(dataset_path / size_name / "test_dataset.parquet"),
-                
+            test_metrics = MetricEvaluator(
+                labels=test_labels,
+                predictions=test_predictions,
+                metric_functions=metric_functions,
             )
-            test_df = process_df(cfg, test_df)
-            y_pred = predict(cfg, bst, test_df, num_iteration=iteration)
-            test_result_df = make_result_df(test_df, y_pred)
-            test_result_df.write_parquet(output_path / "test_result_second.parquet")
+            test_metrics.evaluate()
+            test_result_dict = test_metrics.evaluations
 
-            print(f"{test_result_df}")
-            impression_ids = test_result_df["impression_id"].to_list()
-            prediction_scores = test_result_df["rank"].to_list()
-            write_submission_file(
-                impression_ids=impression_ids,
-                prediction_scores=prediction_scores,
-                path=output_path / "predictions.txt",
-                filename_zip=f"predictions_{size_name}_second.zip",
-            )
-            del test_df, test_result_df
-            gc.collect()
-
-
-def third_stage(cfg: DictConfig, output_path) -> None:
-    print("third_stage")
-    dataset_path = Path(cfg.exp.dataset_path)
-    size_name = cfg.exp.size_name
-
-    if "train" in cfg.exp.third_modes:
-        with utils.trace("load datasets"):
-            train_df = pl.read_parquet(
-                str(dataset_path / size_name / "train_dataset.parquet"),
-                
-            )
-            if cfg.exp.sampling_rate:
-                print(f"{train_df.shape=}")
-                random.seed(cfg.exp.seed)
-                train_impression_ids = sorted(
-                    train_df["impression_id"].unique().to_list()
-                )
-                use_train_impression_ids = random.sample(
-                    train_impression_ids,
-                    int(len(train_impression_ids) * cfg.exp.sampling_rate),
-                )
-                train_df = train_df.filter(
-                    pl.col("impression_id").is_in(use_train_impression_ids)
-                )
-                print(f"{train_df.shape=}")
-                gc.collect()
-            train_df = process_df(cfg, train_df)
-            validation_df = pl.read_parquet(
-                str(dataset_path / size_name / "validation_dataset.parquet"),
-                
-            )
-            if cfg.exp.sampling_rate:
-                random.seed(cfg.exp.seed)
-                validation_impression_ids = sorted(
-                    validation_df["impression_id"].unique().to_list()
-                )
-                use_validation_impression_ids = random.sample(
-                    validation_impression_ids,
-                    int(len(validation_impression_ids) * cfg.exp.sampling_rate),
-                )
-                validation_df = validation_df.filter(
-                    pl.col("impression_id").is_in(use_validation_impression_ids)
-                )
-                gc.collect()
-            validation_df = process_df(cfg, validation_df)
-
-        train_df = pl.concat([train_df, validation_df])
-
-        with utils.trace("train only"):
-            first_bst = None
-            with open(output_path / "model_dict_first_stage.pkl", "rb") as f:
-                first_bst = pickle.load(f)["model"]
-            iteration = first_bst.best_iteration
-            bst = train_only(cfg, train_df, iteration)
-            save_model(cfg, bst, output_path, name="third_stage")
-
-        del train_df, validation_df
-        gc.collect()
-
-    if "predict" in cfg.exp.third_modes:
-        first_bst = None
-        with open(output_path / "model_dict_first_stage.pkl", "rb") as f:
-            first_bst = pickle.load(f)["model"]
-        iteration = first_bst.best_iteration
-        bst = None
-        with open(output_path / "model_dict_third_stage.pkl", "rb") as f:
-            bst = pickle.load(f)["model"]
-
-        with utils.trace("predict test"):
-            test_df = pl.read_parquet(
-                str(dataset_path / size_name / "test_dataset.parquet"),
-                
-            )
-            test_df = process_df(cfg, test_df)
-            y_pred = predict(cfg, bst, test_df, num_iteration=iteration)
-            test_result_df = make_result_df(test_df, y_pred)
-            test_result_df.write_parquet(output_path / "test_result_third.parquet")
-
-            print(f"{test_result_df}")
-            impression_ids = test_result_df["impression_id"].to_list()
-            prediction_scores = test_result_df["rank"].to_list()
-            write_submission_file(
-                impression_ids=impression_ids,
-                prediction_scores=prediction_scores,
-                path=output_path / "predictions.txt",
-                filename_zip=f"predictions_{size_name}_third.zip",
-            )
-            del test_df, test_result_df
-            gc.collect()
+            logger.info(f"TEST: {test_result_dict}")
+            wandb.log({"test_" + k: v for k, v in test_result_dict.items()})
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")
@@ -631,9 +511,7 @@ def main(cfg: DictConfig) -> None:
         mode="disabled" if cfg.debug or cfg.exp.size_name == "demo" else "online",
     )
 
-    first_stage(cfg, output_path)
-    second_stage(cfg, output_path)
-    third_stage(cfg, output_path)
+    main_stage(cfg, output_path)
 
 
 if __name__ == "__main__":
