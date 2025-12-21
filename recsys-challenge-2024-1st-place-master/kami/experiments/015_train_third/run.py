@@ -28,9 +28,10 @@ from ebrec.evaluation import MetricEvaluator
 from ebrec.evaluation import MultiprocessingAucScore as AucScore
 from ebrec.evaluation import MultiprocessingMrrScore as MrrScore
 from ebrec.evaluation import MultiprocessingNdcgScore as NdcgScore
-from ebrec.utils._python import write_submission_file
 from utils.logger import get_logger
 from wandb.integration.lightgbm import wandb_callback, log_summary
+from graph_features import GraphFeatureExtractor, build_interaction_history
+from semantic_cluster_features import SemanticClusterFeatureExtractor
 
 pl.Config.set_ascii_tables(True)
 
@@ -332,6 +333,133 @@ def main_stage(cfg: DictConfig, output_path) -> None:
             del full_validation_df
             gc.collect()
 
+        # Graph-based feature extraction (if enabled) - MUST BE BEFORE process_df
+        logger.info(f"use_graph_features setting: {cfg.exp.get('use_graph_features', False)}")
+        if cfg.exp.get("use_graph_features", False):
+            with utils.trace("graph feature extraction"):
+                logger.info(f"BEFORE graph features - train_df shape: {train_df.shape}, columns: {len(train_df.columns)}")
+                graph_model_path = output_path / "graph_model"
+                
+                # Check if pre-trained graph model exists
+                if (graph_model_path / "user_embeddings.pkl").exists():
+                    logger.info("Loading pre-trained graph model...")
+                    graph_extractor = GraphFeatureExtractor(
+                        embedding_dim=cfg.exp.get("graph_embedding_dim", 64)
+                    )
+                    graph_extractor.load_model(graph_model_path)
+                else:
+                    logger.info("Training new graph model from train_df...")
+                    # Build interaction DataFrame directly from train_df
+                    # Filter to only clicked items (label=1)
+                    interactions_df = train_df.filter(pl.col("label") == 1).select(["user_id", "article_id"]).unique()
+                    logger.info(f"Built interactions from train_df: {len(interactions_df)} unique user-article pairs")
+                    
+                    # Initialize and train graph extractor
+                    graph_extractor = GraphFeatureExtractor(
+                        embedding_dim=cfg.exp.get("graph_embedding_dim", 64),
+                        walk_length=cfg.exp.get("graph_walk_length", 30),
+                        num_walks=cfg.exp.get("graph_num_walks", 200),
+                        workers=cfg.exp.get("graph_workers", 4),
+                    )
+                    
+                    # Build bipartite graph
+                    graph_extractor.build_bipartite_graph(interactions_df)
+                    
+                    # Train Node2Vec
+                    graph_extractor.train_node2vec(save_path=graph_model_path)
+                    
+                    del interactions_df
+                    gc.collect()
+                
+                # Add graph features to datasets
+                include_embeddings = cfg.exp.get("graph_include_embeddings", False)
+                logger.info(f"Adding graph features (include_embeddings={include_embeddings})...")
+                
+                logger.info("Adding graph features to train data...")
+                train_df = graph_extractor.add_graph_features_to_df(train_df, include_embeddings=include_embeddings)
+                logger.info(f"AFTER graph features - train_df shape: {train_df.shape}, columns: {len(train_df.columns)}")
+                gc.collect()
+                
+                logger.info("Adding graph features to validation data...")
+                validation_df = graph_extractor.add_graph_features_to_df(validation_df, include_embeddings=include_embeddings)
+                gc.collect()
+                
+                logger.info("Adding graph features to test data...")
+                test_df = graph_extractor.add_graph_features_to_df(test_df, include_embeddings=include_embeddings)
+                gc.collect()
+                
+                logger.info(f"Graph features added successfully! Train shape: {train_df.shape}")
+
+        # Semantic cluster feature extraction (if enabled)
+        logger.info(f"use_semantic_clusters setting: {cfg.exp.get('use_semantic_clusters', False)}")
+        if cfg.exp.get("use_semantic_clusters", False):
+            with utils.trace("semantic cluster feature extraction"):
+                logger.info(f"BEFORE semantic clusters - train_df shape: {train_df.shape}, columns: {len(train_df.columns)}")
+                semantic_model_path = output_path / "semantic_model"
+                
+                # Check if pre-trained semantic model exists
+                if (semantic_model_path / "article_clusters.pkl").exists():
+                    logger.info("Loading pre-trained semantic cluster model...")
+                    semantic_extractor = SemanticClusterFeatureExtractor(
+                        n_clusters=cfg.exp.get("semantic_n_clusters", 30)
+                    )
+                    semantic_extractor.load_model(semantic_model_path)
+                else:
+                    logger.info("Training new semantic cluster model...")
+                    # Load articles dataset
+                    articles_path = Path("input/ebnerd_testset/ebnerd_testset") / "articles.parquet"
+                    if not articles_path.exists():
+                        logger.warning(f"Articles file not found: {articles_path}")
+                        logger.warning("Skipping semantic cluster feature extraction")
+                    else:
+                        articles_df = pl.read_parquet(articles_path)
+                        
+                        # Initialize and train semantic extractor
+                        semantic_extractor = SemanticClusterFeatureExtractor(
+                            n_clusters=cfg.exp.get("semantic_n_clusters", 30),
+                            max_features=5000,
+                        )
+                        
+                        # Train on article texts
+                        text_column = cfg.exp.get("semantic_text_column", "title")
+                        semantic_extractor.fit(articles_df, text_column=text_column)
+                        
+                        # Save model
+                        semantic_extractor.save_model(semantic_model_path)
+                        
+                        del articles_df
+                        gc.collect()
+                
+                # Add semantic cluster features to datasets
+                if 'semantic_extractor' in locals():
+                    # Load history for user profiling
+                    history_path = dataset_path / size_name / "train" / "history.parquet"
+                    if history_path.exists():
+                        history_df = pl.read_parquet(history_path)
+                    else:
+                        history_df = None
+                        logger.warning("History file not found, user profiling will use empty histories")
+                    
+                    logger.info("Adding semantic cluster features to train data...")
+                    train_df = semantic_extractor.add_cluster_features_to_df(train_df, history_df)
+                    logger.info(f"AFTER semantic clusters - train_df shape: {train_df.shape}, columns: {len(train_df.columns)}")
+                    gc.collect()
+                    
+                    logger.info("Adding semantic cluster features to validation data...")
+                    validation_df = semantic_extractor.add_cluster_features_to_df(validation_df, history_df)
+                    gc.collect()
+                    
+                    logger.info("Adding semantic cluster features to test data...")
+                    test_df = semantic_extractor.add_cluster_features_to_df(test_df, history_df)
+                    gc.collect()
+                    
+                    if history_df is not None:
+                        del history_df
+                        gc.collect()
+                    
+                    logger.info(f"Semantic cluster features added successfully! Train shape: {train_df.shape}")
+
+        with utils.trace("process dataframes"):
             train_df = process_df(cfg, train_df)
             gc.collect()
             validation_df = process_df(cfg, validation_df)
@@ -378,7 +506,56 @@ def main_stage(cfg: DictConfig, output_path) -> None:
             )
             del full_validation_df
             
+            # Add graph features if enabled - MUST BE BEFORE process_df
+            if cfg.exp.get("use_graph_features", False):
+                graph_model_path = output_path / "graph_model"
+                if (graph_model_path / "user_embeddings.pkl").exists():
+                    logger.info("Loading graph model for prediction...")
+                    graph_extractor = GraphFeatureExtractor(
+                        embedding_dim=cfg.exp.get("graph_embedding_dim", 64)
+                    )
+                    graph_extractor.load_model(graph_model_path)
+                    
+                    include_embeddings = cfg.exp.get("graph_include_embeddings", False)
+                    logger.info(f"Adding graph features for prediction (include_embeddings={include_embeddings})...")
+                    validation_df = graph_extractor.add_graph_features_to_df(validation_df, include_embeddings=include_embeddings)
+                    test_df = graph_extractor.add_graph_features_to_df(test_df, include_embeddings=include_embeddings)
+            
+            # Add semantic cluster features if enabled - MUST BE BEFORE process_df
+            if cfg.exp.get("use_semantic_clusters", False):
+                semantic_model_path = output_path / "semantic_model"
+                if not (semantic_model_path / "article_clusters.pkl").exists():
+                    raise FileNotFoundError(
+                        f"Semantic clustering is enabled but model not found at {semantic_model_path}. "
+                        "Please run training first to generate the semantic model."
+                    )
+                
+                logger.info("Loading semantic cluster model for prediction...")
+                semantic_extractor = SemanticClusterFeatureExtractor(
+                    n_clusters=cfg.exp.get("semantic_n_clusters", 30)
+                )
+                semantic_extractor.load_model(semantic_model_path)
+                
+                # Load history for user profiling
+                history_path = dataset_path / size_name / "history.parquet"
+                if history_path.exists():
+                    history_df = pl.read_parquet(str(history_path))
+                else:
+                    history_df = None
+                    logger.warning("History file not found for prediction, using empty histories")
+                
+                logger.info("Adding semantic cluster features to validation data...")
+                validation_df = semantic_extractor.add_cluster_features_to_df(validation_df, history_df)
+                logger.info("Adding semantic cluster features to test data...")
+                test_df = semantic_extractor.add_cluster_features_to_df(test_df, history_df)
+                
+                if history_df is not None:
+                    del history_df
+                gc.collect()
+            
             validation_df = process_df(cfg, validation_df)
+            test_df = process_df(cfg, test_df)
+            
             y_valid_pred = predict(
                 cfg, bst, validation_df, num_iteration=bst.best_iteration
             )
@@ -390,7 +567,6 @@ def main_stage(cfg: DictConfig, output_path) -> None:
             del validation_df, validation_result_df
             gc.collect()
             
-            test_df = process_df(cfg, test_df)
             y_test_pred = predict(cfg, bst, test_df, num_iteration=bst.best_iteration)
             test_result_df = make_result_df(test_df, y_test_pred)
             test_result_df.write_parquet(output_path / "test_result.parquet")
@@ -425,6 +601,52 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 pl.col("impression_id").is_in(test_impression_ids)
             )
             del full_validation_df
+            
+            # Add graph features if enabled - MUST BE BEFORE process_df
+            if cfg.exp.get("use_graph_features", False):
+                graph_model_path = output_path / "graph_model"
+                if (graph_model_path / "user_embeddings.pkl").exists():
+                    logger.info("Loading graph model for eval...")
+                    graph_extractor = GraphFeatureExtractor(
+                        embedding_dim=cfg.exp.get("graph_embedding_dim", 64)
+                    )
+                    graph_extractor.load_model(graph_model_path)
+                    
+                    include_embeddings = cfg.exp.get("graph_include_embeddings", False)
+                    logger.info(f"Adding graph features for eval (include_embeddings={include_embeddings})...")
+                    validation_df = graph_extractor.add_graph_features_to_df(validation_df, include_embeddings=include_embeddings)
+                    test_df = graph_extractor.add_graph_features_to_df(test_df, include_embeddings=include_embeddings)
+            
+            # Add semantic cluster features if enabled - MUST BE BEFORE process_df
+            if cfg.exp.get("use_semantic_clusters", False):
+                semantic_model_path = output_path / "semantic_model"
+                if not (semantic_model_path / "article_clusters.pkl").exists():
+                    raise FileNotFoundError(
+                        f"Semantic clustering is enabled but model not found at {semantic_model_path}. "
+                        "Please run training first to generate the semantic model."
+                    )
+                
+                logger.info("Loading semantic cluster model for eval...")
+                semantic_extractor = SemanticClusterFeatureExtractor(
+                    n_clusters=cfg.exp.get("semantic_n_clusters", 30)
+                )
+                semantic_extractor.load_model(semantic_model_path)
+                
+                # Load history for user profiling
+                history_path = dataset_path / size_name / "history.parquet"
+                if history_path.exists():
+                    history_df = pl.read_parquet(str(history_path))
+                else:
+                    history_df = None
+                    logger.warning("History file not found for eval, using empty histories")
+                
+                logger.info("Adding semantic cluster features for eval...")
+                validation_df = semantic_extractor.add_cluster_features_to_df(validation_df, history_df)
+                test_df = semantic_extractor.add_cluster_features_to_df(test_df, history_df)
+                
+                if history_df is not None:
+                    del history_df
+                gc.collect()
             
             validation_df = process_df(cfg, validation_df)
             test_df = process_df(cfg, test_df)
@@ -485,6 +707,30 @@ def main_stage(cfg: DictConfig, output_path) -> None:
 
             logger.info(f"TEST: {test_result_dict}")
             wandb.log({"test_" + k: v for k, v in test_result_dict.items()})
+        
+        # Save results to a separate file for easy access
+        with utils.trace("save results to file"):
+            results_file = output_path / "results.txt"
+            with open(results_file, "w", encoding="utf-8") as f:
+                f.write("=" * 60 + "\n")
+                f.write("EVALUATION RESULTS\n")
+                f.write("=" * 60 + "\n\n")
+                
+                f.write("VALIDATION METRICS:\n")
+                f.write("-" * 40 + "\n")
+                for metric_name, metric_value in val_result_dict.items():
+                    f.write(f"  {metric_name:20s}: {metric_value:.6f}\n")
+                
+                f.write("\n")
+                f.write("TEST METRICS:\n")
+                f.write("-" * 40 + "\n")
+                for metric_name, metric_value in test_result_dict.items():
+                    f.write(f"  {metric_name:20s}: {metric_value:.6f}\n")
+                
+                f.write("\n")
+                f.write("=" * 60 + "\n")
+            
+            logger.info(f"Results saved to: {results_file}")
 
 
 @hydra.main(version_base=None, config_path=".", config_name="config")

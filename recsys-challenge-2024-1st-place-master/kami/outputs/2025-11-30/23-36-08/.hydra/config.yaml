@@ -1,6 +1,0 @@
-exp:
-  seed: 42
-  size_name: small
-  dataset_path: output/preprocess/dataset067
-  popularity_weight: 0.7
-dir: ???

@@ -79,7 +79,7 @@ def create_datasets(ctx, debug=False):
 def train(ctx, debug=False):
     scripts = [
         ("experiments/015_train_third/run.py", '067_001'),
-        ("experiments/016_catboost/run.py", '067'),
+        # ("experiments/016_catboost/run.py", '067'),  # Disabled - only using LightGBM
     ]
     for script, exp in scripts:
         print("*"*20)
