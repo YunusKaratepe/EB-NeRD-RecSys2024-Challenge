@@ -1,8 +1,8 @@
-input_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/input
-output_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output
-exp_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output/experiments
-features_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output/features
-preprocess_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output/preprocess
-candidate_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output/preprocess/make_candidate
+input_dir: input
+output_dir: output
+exp_dir: output/experiments
+features_dir: output/features
+preprocess_dir: output/preprocess
+candidate_dir: output/preprocess/make_candidate
 
 gcs_bucket: gs://recsys2024/murakami
