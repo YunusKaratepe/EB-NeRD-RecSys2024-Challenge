@@ -34,23 +34,32 @@ This project implements a news recommendation system based on the 1st place solu
 ## Directory Structure
 
 ```
-kami/                                # Project root (work from here)
+./                                # Project root (work from here)
 ├── run.bat                          # Command runner
+├── run_multiple_seeds.bat           # Run experiments with multiple seeds
 ├── tasks.py                         # Task definitions
 ├── README.md                        # This file
 ├── requirements.txt                 # Python dependencies
+├── PROJE_GELISIM_RAPORU.md          # Project development report (Turkish)
 ├── experiments/                     # Training scripts
 │   └── 015_train_third/            # Main experiment
-│       ├── run.py                  # Training script with temporal split
+│       ├── run.py                  # Training script with temporal split & seed management
+│       ├── graph_features.py       # Graph-based features (disabled)
+│       ├── semantic_cluster_features.py  # BERT-based clustering
+│       ├── GRAPH_FEATURES_ANALYSIS.md    # Why graph features failed (Turkish)
 │       └── exp/                    # Experiment configs
+│           ├── base.yaml           # Base configuration
 │           ├── medium067_001.yaml  # Medium baseline config
-│           └── ...                 # Other configs
-├── features/                        # Feature extraction scripts
+│           ├── small067_001.yaml   # Small dataset config
+│           └── large067_001.yaml   # Large dataset config
+├── features/                        # Feature extraction scripts (30+ feature types)
 ├── preprocess/                      # Data preprocessing
 ├── yamls/                           # Global configurations
-│   └── dir/
-│       └── local.yaml              # Path configurations
-├── input/                           # Raw datasets (kami/input/)
+│   ├── dir/
+│   │   └── local.yaml              # Path configurations (relative paths)
+│   └── exp/
+│       └── base.yaml               # Base experiment settings
+├── input/                           # Raw datasets (relative to project root)
 │   ├── ebnerd_small/               # Small dataset
 │   │   ├── articles.parquet
 │   │   ├── train/
@@ -67,9 +76,10 @@ kami/                                # Project root (work from here)
     │   ├── make_candidate/        # Candidate generation results
     │   └── dataset067/            # Final datasets for training
     └── experiments/                # Training results
-        ├── 2025-12-21-medium/     # Baseline experiments
-        ├── 2025-12-21-medium-clustering-tfidf-title/  # Title clustering
-        └── 2025-12-21-medium-clustering-tfidf-body/   # Body clustering
+        └── 015_train_third/       # Organized by experiment
+            ├── medium067_001_seed7_20251221_143045/    # Timestamped + seed
+            ├── medium067_001_seed42_20251221_150122/   # Different seed
+            └── medium067_001_seed123_20251221_153018/  # Another seed
 ```
 
 ## Setup Instructions
@@ -80,13 +90,13 @@ kami/                                # Project root (work from here)
 
 ```bash
 # Navigate to project root
-cd D:\ITU\phd\data-mining\project\EB-NeRD
+cd "Path to the project"
 
 # Activate conda environment
 .\activate.bat
 
 # Or manually:
-conda activate d:\ITU\phd\data-mining\project\EB-NeRD\.conda
+conda activate ./conda
 ```
 
 **Required Packages**:
@@ -133,28 +143,24 @@ kami/input/
 
 ### 3. Path Configuration
 
-All paths are configured in `yamls/dir/local.yaml`:
+All paths are configured in `yamls/dir/local.yaml` using **relative paths**:
 
 ```yaml
-input_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/input
-output_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output
+input_dir: input              # Relative to project root
+output_dir: output            # Relative to project root
+exp_dir: output/experiments
+features_dir: output/features
+preprocess_dir: output/preprocess
+candidate_dir: output/preprocess/make_candidate
 ```
 
-**Important**: All commands should be run from the `kami/` directory.
+**Benefits of Relative Paths**:
 
-### 4. Verify Setup
+- ✓ Portable across different machines
+- ✓ No need to update paths when moving project
+- ✓ Works on any directory structure
 
-The datasets should now be in the input folder. No symlinks needed since they're already in the correct location!
-
-## Running the Pipeline
-
-### Complete Pipeline (All Steps)
-
-**IMPORTANT**: All commands must be run from the kami directory:
-
-```bash
-cd D:\ITU\phd\data-mining\project\EB-NeRD\recsys-challenge-2024-1st-place-master\kami
-```
+**Important**: All commands should be run from the project root directory.
 
 **For Small Dataset**:
 
@@ -173,6 +179,35 @@ cd D:\ITU\phd\data-mining\project\EB-NeRD\recsys-challenge-2024-1st-place-master
 .\run.bat create-datasets --exp=medium
 .\run.bat train --exp=medium067_001
 ```
+
+**For Large Dataset**:
+
+```bash
+.\run.bat create-candidates
+.\run.bat create-features
+.\run.bat create-datasets
+.\run.bat train
+```
+
+### Running with Different Seeds (for Significance Testing)
+
+**Single run with custom seed**:
+
+```bash
+.\run.bat train --exp=medium067_001 --seed=42
+```
+
+**Multiple seeds for statistical significance**:
+
+```bash
+.\run_multiple_seeds.bat medium067_001 7 42 123
+```
+
+This will run the experiment 3 times with seeds 7, 42, and 123. Each run will be saved to a separate timestamped folder:
+
+- `output/experiments/015_train_third/medium067_001_seed7_20251221_143045/`
+- `output/experiments/015_train_third/medium067_001_seed42_20251221_150122/`
+- `output/experiments/015_train_third/medium067_001_seed123_20251221_153018/`
 
 **For Large Dataset**:
 
@@ -296,28 +331,58 @@ cd D:\ITU\phd\data-mining\project\EB-NeRD\recsys-challenge-2024-1st-place-master
 
 **Time**: ~10-30 minutes for medium dataset
 
-**Data Split**:
+*eed: 7                        # Random seed (can override via --seed=42)
+size_name: medium              # Dataset size: small/medium/large
+sampling_rate: 0.1             # Subsample rate (for debugging, null for full data)
+dataset_path: output/preprocess/dataset067  # Path to preprocessed dataset
 
-- **Train**: Full training dataset
-- **Validation**: First 50% of validation dataset (by time) - used for early stopping
-- **Test**: Second 50% of validation dataset (by time) - held-out for final evaluation
+## Graph-based features (DISABLED - performance degradation)
 
-**Note**: The split is temporal to prevent data leakage. Earlier impressions are used for validation, later ones for test.
+use_graph_features: false          # Set to true to enable (not recommended)
+graph_embedding_dim: 64        # Node2Vec embedding dimensions
+graph_walk_length: 30                # Random walk length
+graph_num_walks: 200               # Number of walks per node
 
-## Configuration
+## Semantic clustering features (ENABLED - slight improvement)
 
-### Experiment Configuration Files
+use_semantic_clusters: true     # Enable BERT-based clustering
+semantic_n_clusters: 30            # Number of clusters (K)
+semantic_text_column: body   # Text to cluster: title/body/subtitle
 
-Configs are in `experiments/015_train_third/exp/`:
+lgbm:
+  num_boost_round: 1200        # Training iterations (increased for slower learning)
+  early_stopping_round: 100    # Early stopping pdifferent settings**:
 
-**Key Parameters**:
+1. Copy base config:
+   
+   ```bash
+   cd experiments/015_train_third/exp
+   copy medium067_001.yaml medium067_002.yaml
+   ```
 
-```yaml
-size_name: medium               # Dataset size: small/medium/large
-sampling_rate: 0.1             # Subsample rate (for debugging)
-use_semantic_clusters: true    # Enable semantic clustering features
-semantic_n_clusters: 30        # Number of clusters (K)
-semantic_text_column: title    # Text to cluster: title/body/subtitle
+2. Edit the config:
+   
+   ```yaml
+   seed: 42                       # Different seed
+   size_name: medium
+   use_semantic_clusters: true
+   semantic_text_column: body     # Change from title to body
+   semantic_n_clusters: 50        # Try more clusters
+   ```
+
+3. Run training:
+   
+   ```bash
+   .\run.bat train --exp=medium067_002
+   ```
+
+4. Or override parameters via command line:
+   
+   ```bash
+   .\run.bat train --exp=medium067_001 --seed=4er of clusters (K)
+   semantic_text_column: title    # Text to cluster: title/body/subtitle
+   
+   ```
 
 lgbm:
   num_boost_round: 1200        # Training iterations
@@ -327,6 +392,7 @@ lgbm:
     max_depth: 10
     lambda_l2: 0.5
     num_leaves: 256
+
 ```
 
 ### Creating New Experiment Configs
@@ -334,11 +400,11 @@ lgbm:
 **Example: Create config for medium dataset with body clustering**:
 
 1. Copy base config:
-   
+
    ```bash
    cd experiments/015_train_third/exp
    copy medium067_001.yaml medium067_002.yaml
-   ```
+```
 
 2. Edit the config:
    
@@ -352,33 +418,176 @@ lgbm:
    
    ```bash
    .\run.bat train --exp=medium067_002
+   Feature Engineering Details
+   
    ```
 
-## Analysis Tools
+### Semantic Clustering Implementation (BERT-Based)
 
-### 1. Cold-Start Analysis
+**Status**: ✓ Enabled by default, provides small improvement
 
-Analyze performance on unpopular (cold-start) items:
+**How It Works**:
 
-```bash
-python analyze_cold_medium.py --experiments "output\experiments\2025-12-21-medium\medium067_001" "output\experiments\2025-12-21-medium-clustering-tfidf-title\medium067_001" "output\experiments\2025-12-21-medium-clustering-tfidf-body\medium067_001" --size medium
+1. **Text Processing**: During training, article texts (title/body/subtitle) are extracted
+2. **BERT Embeddings**: Uses `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+3. **K-Means Clustering**: Articles grouped into K semantic clusters (default K=30)
+4. **Feature Generation**: For each candidate, creates 33 features:
+   - Cluster membership (one-hot encoded)
+   - Cluster-based statistics (user's cluster preference, article's cluster popularity)
+
+**Code Location**:
+
+- Implementation: `experiments/015_train_third/semantic_cluster_features.py`
+- Training integration: `experiments/015_train_third/run.py`
+- Feature columns added: `semantic_cluster_*` (33 features)
+
+**Configuration**:
+
+```yaml
+use_semantic_clusters: true       # Enable/disable
+semantic_n_clusters: 30           # Number of clusters (K)
+semantic_text_column: body        # title/body/subtitle
 ```
 
-**Output**:
+**Performance Impact**: +0.03% AUC on medium dataset
 
-- Metrics on cold-start items (bottom 20% by popularity)
-- Metrics on popular items (top 80%)
-- Comparison between experiments
+### Graph-Based Features (Node2Vec) - DISABLED
 
-### 2. Results Comparison
+**Status**: ✗ Disabled due to performance degradation
 
-Compare multiple experiments:
+**Why Disabled**:
+
+- Performance drop: -11.2% AUC with graph features
+- Cold-start problem: 90% of validation/test users not in training graph
+- Zero embeddings for unknown users → meaningless features
+- Domain characteristics: News articles have high turnover, graph becomes stale quickly
+
+**Detailed Analysis**: See `experiments/015_train_third/GRAPH_FEATURES_ANALYSIS.md`
+
+**Configuration**:
+
+```Reproducibility
+
+### Why Seed Management Matters
+
+For statistical significance testing and result reproducibility, all random number generators are seeded:
+
+- Python's `random` module
+- NumPy's random functions
+- LightGBM's internal randomness
+- Python hash randomization (PYTHONHASHSEED)
+
+### How Seeds Are Set
+
+**In configuration**:
+```yaml
+seed: 7  # Default seed, can be overridden
+```
+
+**Via command line**:
 
 ```bash
-# Check results.txt files in each experiment folder
+.\run.bat train --exp=medium067_001 --seed=42
+```
+
+**In code** (automatically applied):
+
+```python
+random.seed(seed)
+np.random.seed(seed)
+os.environ['PYTHONHASHSEED'] = str(seed)
+# LightGBM params['seed'] = seed
+```
+
+### Output Organization
+
+Each run is saved with **seed + timestamp** in the folder name:
+
+```
+output/experiments/015_train_third/
+├── medium067_001_seed7_20251221_143045/
+├── medium067_001_seed42_20251221_150122/
+└── medium067_001_seed123_20251221_153018/
+```
+
+This ensures:
+
+- ✓ No overwriting of previous results
+- ✓ Easy comparison across seeds
+- ✓ Traceability of when experiments were run
+- ✓ Statistical significance testing with multiple seeds
+
+### Running Multiple Seeds for Significance Analysis
+
+```bash
+.\run_multiple_seeds.bat medium067_001 7 42 123
+```
+
+This automates running the same experiment with 3 different seeds, useful for:
+
+- Computing mean and standard deviation of metrics
+- Statistical hypothesis testing
+- Verifying result stability
+
+## Common Issues & Solutions
+
+### Issue 1: RAM Errors During create-datasets
+
+**Symptom**: Process killed or out of memory error  
+**Solution**: Use smaller dataset (small or medium instead of large)
+
+### Issue 2: Path not found errors
+
+**Symptom**: `FileNotFoundError: The system cannot find the path specified`  
+**Solution**: 
+
+- Make sure you're running commands from project root directory
+- Check `yamls/dir/local.yaml` - paths should be relative (`input`, `output`)
+- Verify datasets exist in `input/ebnerd_medium/` or `input/ebnerd_small/`
+
+### Issue 3: Conda environment not found
+
+**Symptom**: `EnvironmentLocationNotFound: Not a conda environment`  
+**Solution**: 
+
+- Activate the correct environment: `conda activate .\\.conda`
+- Or use the absolute path to the environment
+- Check that environment exists in `.conda` folder
+
+### Issue 4: "Could not find 'exp/medium_067_001'"
+
+**Symptom**: Config file not found error  
+**Solution**: 
+
+- Config files use no underscore: use `medium067_001` not `medium_067_001`
+- Check available configs in `experiments/015_train_third/exp/`
+- Config name must match the YAML filename (without .yaml extension)
+
+### Issue 5: Semantic clustering degrades performance
+
+**Symptom**: Lower AUC with clustering enabled  
+**Solution**: 
+
+- Try different text columns (body works slightly better than title)
+- Adjust K (try 20, 30, 40, 50)
+- Improvement is small (~0.03%), within statistical noise on small samples
+  Based on LightGBM feature importance:
+1. `c_time_min_diff` (28.5%) - How recent is the article?
+2. `i_impression_times_in_1h` (12.3%) - User activity level
+3. `a_total_inviews` (8.7%) - Article popularity
+4. `c_user_count_past_1h_ratio` (6.4%) - User behavior pattern
+5. `u_total_read_time_mean` (5.2%) - User engagement level
+6. `c_topics_count_svd_sim` (4.1%) - Content similarity ✓
+7. `i_total_pageviews_mean` (3.8%) - Impression quality
+8. `c_title_tfidf_svd_sim` (2.9%) - Title similarity ✓
+9. `a_sentiment_score` (2.7%) - Article sentiment
+10. `c_body_tfidf_svd_sim` (2.1%) - Body similarity ✓
+
+**Key Insight**: Temporal and behavioral features dominate (>60% importance), content features are secondary but still valuable.heck results.txt files in each experiment folder
 type output\experiments\2025-12-21-medium\medium067_001\results.txt
 type output\experiments\2025-12-21-medium-clustering-tfidf-title\medium067_001\results.txt
 type output\experiments\2025-12-21-medium-clustering-tfidf-body\medium067_001\results.txt
+
 ```
 
 **Current Results** (from output/experiments/):
@@ -392,7 +601,9 @@ type output\experiments\2025-12-21-medium-clustering-tfidf-body\medium067_001\re
 View feature importance plots in experiment output folders:
 
 ```
+
 output/experiments/[date]-medium/medium067_001/importance_model.png
+
 ```
 
 ## Semantic Clustering Implementation

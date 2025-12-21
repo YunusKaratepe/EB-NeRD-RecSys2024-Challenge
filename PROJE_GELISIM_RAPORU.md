@@ -11,6 +11,7 @@
 ### 1.1. Problem Tanımı
 
 Bir haber platformunda, kullanıcılara içerik önerileri yapmak için bir makine öğrenmesi modeli geliştiriyoruz. Problem, **ranking** problemi olarak tanımlanmıştır:
+
 - Her impression (gösterim) için birden fazla aday makale var
 - Bu makaleleri kullanıcının tıklama ihtimaline göre sıralamak gerekiyor
 - Metrikler: AUC, nDCG@5, nDCG@10, MRR
@@ -18,11 +19,13 @@ Bir haber platformunda, kullanıcılara içerik önerileri yapmak için bir maki
 ### 1.2. Mevcut Model Başarısı
 
 **Baseline Model Performansı** (LightGBM + 103 feature):
+
 - **AUC**: 0.845
 - **nDCG@10**: 0.730
 - **MRR**: 0.651
 
 **Kullanılan Yaklaşım**: 
+
 - Model: LightGBM (Gradient Boosting)
 - Objective: LambdaRank (learning-to-rank)
 - Feature Sayısı: 103 özellik
@@ -35,9 +38,11 @@ Bir haber platformunda, kullanıcılara içerik önerileri yapmak için bir maki
 ### 2.1. TF-IDF Tabanlı Benzerlik Özellikleri (Mevcut Başarılı Yaklaşım)
 
 #### Yöntem
+
 Makale içerikleri (başlık, alt başlık, gövde metni) ile kullanıcı geçmişi arasında **metin benzerliği** hesaplanıyor.
 
 #### Parametreler
+
 ```yaml
 # TF-IDF konfigürasyonu
 max_features: 10000           # Kelime dağarcığı boyutu
@@ -52,16 +57,23 @@ n_components: 100             # 100 boyuta indir
 #### Üretilen Özellikler
 
 1. **c_title_tfidf_svd_sim**: Başlık benzerliği
+   
    - Kullanıcının geçmişte okuduğu makalelerin başlıkları
    - Aday makalenin başlığı
    - TF-IDF → SVD → Cosine similarity
 
 2. **c_subtitle_tfidf_svd_sim**: Alt başlık benzerliği
+
 3. **c_body_tfidf_svd_sim**: Gövde metni benzerliği
+
 4. **c_category_tfidf_sim**: Kategori benzerliği
+
 5. **c_subcategory_tfidf_sim**: Alt kategori benzerliği
+
 6. **c_entity_groups_tfidf_sim**: Varlık grubu benzerliği
+
 7. **c_ner_clusters_tfidf_sim**: İsimlendirilmiş varlık benzerliği
+
 8. **c_topics_count_svd_sim**: Konu benzerliği
 
 **Toplam**: 8 benzerlik özelliği
@@ -69,16 +81,19 @@ n_components: 100             # 100 boyuta indir
 #### Sonuçlar
 
 **✓ Avantajlar**:
+
 - Cold-start problemine dayanıklı (yeni kullanıcılar için de çalışıyor)
 - İçerik tabanlı, her makale için geçerli
 - Hesaplama maliyeti düşük
 
 **✗ Dezavantajlar**:
+
 - **Sınırlı etki**: Feature importance analizinde orta-düşük önem
-- Model performansına katkısı **%2-3 civarında**
+- Genel model başarısına katkısı **%0.1** civarında
 - Davranışsal özellikler (tıklama, zaman) çok daha etkili
 
 #### Feature Importance Sıralaması
+
 ```
 Top 10 Most Important Features:
 1. c_time_min_diff                    (28.5%) ← Temporal
@@ -98,14 +113,17 @@ Top 10 Most Important Features:
 #### Neden Sınırlı Etki?
 
 1. **Domain özellikleri**: Haber domain'i çok hızlı değişiyor
+   
    - Bugünün haberleri yarın irrelevant
    - İçerik benzerliği statik, trend'leri yakalamıyor
-   
+
 2. **Zamansallık baskın**: Kullanıcılar **yeni** haberleri tercih ediyor
+   
    - `c_time_min_diff` (makale ne kadar yeni) en önemli feature
    - İçerik benzerliği ikincil kalıyor
 
 3. **Behavioral signals güçlü**: Geçmiş tıklama davranışı içerikten daha iyi predictor
+   
    - Kullanıcının son 1 saatteki davranışı
    - Makale ne kadar impression almış
    - Impression içindeki sıra (rank)
@@ -119,6 +137,7 @@ Top 10 Most Important Features:
 Kullanıcı-makale etkileşimlerinden **iki parçalı çizge (bipartite graph)** oluşturup, **Node2Vec** algoritması ile node embedding'leri öğreniyoruz.
 
 **Çizge Yapısı**:
+
 ```
 Nodes:
 - Kullanıcılar: {u1, u2, u3, ..., u_N}
@@ -135,6 +154,7 @@ u2 --tıkladı--> a8
 ```
 
 **Node2Vec Parametreleri**:
+
 ```yaml
 graph_embedding_dim: 64      # Embedding boyutu
 graph_walk_length: 30        # Random walk uzunluğu
@@ -143,6 +163,7 @@ graph_workers: 4             # Paralel işlem sayısı
 ```
 
 **Algorithm Flow**:
+
 1. Train verisi üzerinden graph oluştur
 2. Node2Vec ile random walk'lar üret
 3. Word2Vec ile embedding'leri öğren
@@ -151,24 +172,27 @@ graph_workers: 4             # Paralel işlem sayısı
 #### Üretilen Özellikler
 
 **Yaklaşım A - Tüm Embeddings (131 feature)**:
+
 - User embedding: 64 boyut
 - Article embedding: 64 boyut
 - Interaction features: 3 (dot product, cosine sim, euclidean distance)
 
 **Yaklaşım B - Sadece Interaction Features (3 feature)**:
+
 - `g_dot_product`: user_emb · article_emb
 - `g_cosine_sim`: cos(user_emb, article_emb)
 - `g_euclidean_dist`: ||user_emb - article_emb||
 
 #### Deneysel Sonuçlar
 
-| Konfigürasyon | AUC | nDCG@5 | nDCG@10 | MRR | Feature Sayısı |
-|---------------|-----|--------|---------|-----|----------------|
-| **Baseline (Graph yok)** | **0.8453** | **0.7140** | **0.7305** | **0.6507** | 103 |
-| Graph + Tüm Embeddings | 0.7299 | 0.5624 | 0.6035 | 0.4954 | 234 |
-| Graph + Interaction Only | 0.7508 | 0.5900 | 0.6241 | 0.5221 | 106 |
+| Konfigürasyon            | AUC        | nDCG@5     | nDCG@10    | MRR        | Feature Sayısı |
+| ------------------------ | ---------- | ---------- | ---------- | ---------- | -------------- |
+| **Baseline (Graph yok)** | **0.8453** | **0.7140** | **0.7305** | **0.6507** | 103            |
+| Graph + Tüm Embeddings   | 0.7299     | 0.5624     | 0.6035     | 0.4954     | 234            |
+| Graph + Interaction Only | 0.7508     | 0.5900     | 0.6241     | 0.5221     | 106            |
 
 **Performans Düşüşü**:
+
 - AUC: **-11.2%** (Yaklaşım B) ile **-11.6%** (Yaklaşım A)
 - nDCG@10: **-14.6%** ile **-17.4%**
 - MRR: **-19.8%** ile **-23.9%**
@@ -194,11 +218,11 @@ Validation Set:
 
 **Coverage Analizi**:
 
-| Set | Unique Users | Graph'ta Bulunan | Coverage |
-|-----|--------------|------------------|----------|
-| Train | 8,844 | 8,844 | 100% |
-| Validation | ~7,500 | ~800 | **~10%** |
-| Test | ~7,600 | ~750 | **~10%** |
+| Set        | Unique Users | Graph'ta Bulunan | Coverage |
+| ---------- | ------------ | ---------------- | -------- |
+| Train      | 8,844        | 8,844            | 100%     |
+| Validation | ~7,500       | ~800             | **~10%** |
+| Test       | ~7,600       | ~750             | **~10%** |
 
 **Sonuç**: Validation/test kullanıcılarının **%90'ı** train graph'ında yok!
 
@@ -215,6 +239,7 @@ def get_user_embedding(self, user_id: str) -> np.ndarray:
 ```
 
 **Validation/test için**:
+
 ```python
 user_embedding = [0, 0, 0, ..., 0]  # 64 sıfır
 article_embedding = [0.3, -0.1, 0.5, ...]  # Gerçek değerler
@@ -231,10 +256,10 @@ g_euclidean_dist = ||[0,0,...,0] - article|| = ||article|| = sabit
 
 131 yeni feature eklendi ama bunların %90'ı **bilgi taşımıyor** (sıfır):
 
-| Feature Count | Training AUC | Validation AUC | Overfitting Gap |
-|---------------|--------------|----------------|-----------------|
-| 103 (baseline) | 0.866 | 0.845 | **0.021** ✓ |
-| 234 (graph) | 0.901 | 0.730 | **0.171** ✗ |
+| Feature Count  | Training AUC | Validation AUC | Overfitting Gap |
+| -------------- | ------------ | -------------- | --------------- |
+| 103 (baseline) | 0.866        | 0.845          | **0.021** ✓     |
+| 234 (graph)    | 0.901        | 0.730          | **0.171** ✗     |
 
 Overfitting gap **8 kat arttı**!
 
@@ -252,10 +277,12 @@ Overfitting gap **8 kat arttı**!
 ```
 
 **Neden bu strateji seçildi?**
+
 - Gerçek dünya senaryosunu simüle eder (gelecek tahmini)
 - Yeni kullanıcılar sürekli geliyor (cold-start realistic)
 
 **Graph methods için ideal olmaması**:
+
 - Graph methods **tüm node'ları** bilmek ister
 - Cold-start'ta başarısız oluyorlar
 
@@ -264,6 +291,7 @@ Overfitting gap **8 kat arttı**!
 Haber domain'i statik değil, **son derece dinamik**:
 
 **Makale Yaşam Döngüsü**:
+
 ```
 Publish → [Peak 0-6 saat] → [Decline 6-24 saat] → [Dead 24+ saat]
 
@@ -272,16 +300,19 @@ Train-test arasındaki zaman: ~7 gün
 ```
 
 **Train ile Test Arasında Makale Overlap**:
+
 - Train'deki makalelerin %5'i test setinde var
 - Test'teki makalelerin %95'i train'de görmediğimiz yeni makaleler
 
 **Graph için sonuç**:
+
 - Article embeddings de çoğunlukla cold-start
 - Hem kullanıcı hem makale yeni → double cold-start!
 
 #### Teorik Beklenti vs Gerçeklik
 
 **Teorik (Node2Vec paper)**:
+
 ```
 user_A → article_1 ← user_B → article_2
 
@@ -291,6 +322,7 @@ user_B üzerinden dolaylı bağlantı yakalanır
 ```
 
 **Bizim durumumuzda**:
+
 ```
 Train:  user_A → article_1
 Test:   user_NEW → article_2
@@ -303,21 +335,25 @@ article_2 graph'ta yok!
 #### Neden Graph Yöntemleri Bu Domain'de Başarısız?
 
 **1. Temporal Dynamics Baskın**:
+
 - Graph statik bir yapı, zamanı modellemiyor
 - Haber domain'inde **"ne kadar yeni"** en önemli faktör
 - Graph embedding'leri bu bilgiyi yakalayamıyor
 
 **2. Content Heterogeneity**:
+
 - Her makale benzersiz içerik (günlük haberler)
 - User-article etkileşimleri tekrar etmiyor
 - Graph'ın gücü **recurring patterns**, burada yok
 
 **3. Cold-Start Kaçınılmaz**:
+
 - Yeni kullanıcılar sürekli geliyor
 - Yeni makaleler sürekli yayınlanıyor
 - Graph her zaman incomplete olacak
 
 **4. Sparse Interactions**:
+
 - Her kullanıcı ortalama 5-10 makale okuyor
 - Graph çok seyrek (sparse)
 - Meaningful embedding öğrenmek zor
@@ -331,12 +367,14 @@ article_2 graph'ta yok!
 Graph features'ların çok fazla olması nedeniyle (131 feature), **sadece en yüksek importance'a sahip olanları** seçmeyi denedik.
 
 **Strateji**:
+
 1. Tüm features ile bir model eğit
 2. LightGBM feature importance hesapla
 3. Top-K (örn: K=20) graph feature seç
 4. Sadece bu features ile yeni model eğit
 
 #### Parametreler
+
 ```python
 # Feature selection
 selection_method: "importance"
@@ -346,32 +384,36 @@ threshold: 0.01  # %1'den düşük importance → kes
 
 #### Sonuçlar
 
-| Approach | Features Used | AUC | nDCG@10 | Performans |
-|----------|--------------|-----|---------|------------|
-| All Graph Features | 131 | 0.730 | 0.604 | ✗ Kötü |
-| Top-20 Graph Features | 20 | 0.753 | 0.624 | ✗ Hala kötü |
-| Top-10 Graph Features | 10 | 0.768 | 0.641 | ✗ Hala baseline'ın altında |
-| **No Graph (Baseline)** | **0** | **0.845** | **0.730** | **✓ En iyi** |
+| Approach                | Features Used | AUC       | nDCG@10   | Performans                 |
+| ----------------------- | ------------- | --------- | --------- | -------------------------- |
+| All Graph Features      | 131           | 0.730     | 0.604     | ✗ Kötü                     |
+| Top-20 Graph Features   | 20            | 0.753     | 0.624     | ✗ Hala kötü                |
+| Top-10 Graph Features   | 10            | 0.768     | 0.641     | ✗ Hala baseline'ın altında |
+| **No Graph (Baseline)** | **0**         | **0.845** | **0.730** | **✓ En iyi**               |
 
 **Sonuç**: Feature selection yardımcı olmadı, **graph features'ın tamamının çıkarılması** en iyi sonucu verdi.
 
 #### Neden Feature Selection İşe Yaramadı?
 
 **1. Zero Embedding problemi düzelmiyor**:
+
 - Top-K feature seçmek zero embedding'leri düzeltmiyor
 - Hala %90 örnekte sıfır veya sabit değerler
 
 **2. Information loss minimal**:
+
 - 131 feature'ın hepsi az bilgi taşıyor
 - En iyi 20'si de yeterli bilgi sağlamıyor
 - Kayıp: çok az, kazanç: yok
 
 **3. Overfitting devam ediyor**:
+
 - Feature sayısı azaldı (234 → 123)
 - Ama model hala train setine overfit oluyor
 - Çünkü **feature quality** değişmiyor, sadece **quantity**
 
 **4. Root cause çözülmüyor**:
+
 - Asıl problem: cold-start ve zero embeddings
 - Feature selection bu problemi çözmüyor
 - Sadece semptomları hafifletiyor
@@ -385,11 +427,13 @@ threshold: 0.01  # %1'den düşük importance → kes
 TF-IDF'in sınırlamalarını aşmak için **BERT embeddings** kullanarak semantic clustering.
 
 **Yaklaşım**:
+
 1. **Global Clustering**: Tüm makaleleri BERT ile embed et, K-Means ile cluster'la
 2. **User Profiling**: Her kullanıcının okuma geçmişinden cluster distribution hesapla
 3. **Match Features**: Kullanıcı profili ile aday makale cluster'ı arasında benzerlik
 
 #### Parametreler
+
 ```yaml
 use_semantic_clusters: true
 semantic_n_clusters: 30           # K-Means cluster sayısı
@@ -409,11 +453,13 @@ bert_model: paraphrase-multilingual-MiniLM-L12-v2
 #### Beklenen Avantajlar
 
 **✓ TF-IDF'e göre**:
+
 - Semantic anlam yakalıyor (kelime bazında değil)
 - Synonyms ve paraphrases'i anlıyor
 - Multilingual (Türkçe/İngilizce karışık içerik)
 
 **✓ Graph'a göre**:
+
 - Cold-start problemi yok (content-based)
 - Her makale için cluster assignment var
 - Yeni kullanıcılar için geçmişten profil oluşturuyor
@@ -421,6 +467,7 @@ bert_model: paraphrase-multilingual-MiniLM-L12-v2
 #### Mevcut Durum
 
 **Henüz tam test edilmedi**, ama initial signs:
+
 - Hesaplama maliyeti yüksek (BERT inference)
 - TF-IDF'den daha iyi sonuç bekleniyor
 - %5-7 performans artışı hedefleniyor
@@ -434,6 +481,7 @@ bert_model: paraphrase-multilingual-MiniLM-L12-v2
 **Model**: LightGBM (Light Gradient Boosting Machine)
 
 **Neden LightGBM?**
+
 - ✓ Ranking task'leri için optimize (LambdaRank objective)
 - ✓ Büyük veri setlerinde hızlı
 - ✓ Categorical features native support
@@ -441,6 +489,7 @@ bert_model: paraphrase-multilingual-MiniLM-L12-v2
 - ✓ Interpretable (feature importance)
 
 **Alternatifler değerlendirildi**:
+
 - ✗ XGBoost: Daha yavaş, benzer performans
 - ✗ CatBoost: Denendi (experiments/016_catboost/), LightGBM'den marginally worse
 - ✗ Neural Networks: Overfitting, interpretability düşük
@@ -450,23 +499,23 @@ bert_model: paraphrase-multilingual-MiniLM-L12-v2
 ```yaml
 lgbm:
   objective: lambdarank              # Learning-to-rank için
-  
+
   # Eğitim parametreleri
   num_boost_round: 1200              # İterasyon sayısı (800'den artırıldı)
   early_stopping_round: 100          # Patience (80'den artırıldı)
   learning_rate: 0.03                # Öğrenme hızı (0.05'ten düşürüldü)
-  
+
   # Tree parametreleri
   max_depth: 10                      # Ağaç derinliği (8'den artırıldı)
   num_leaves: 256                    # Yaprak sayısı (128'den artırıldı)
   min_child_samples: 10              # Minimum örneklem sayısı
-  
+
   # Regularization
   lambda_l2: 0.5                     # L2 regularization (0.1'den artırıldı)
   feature_fraction: 0.7              # Her ağaçta feature'ların %70'i (0.8'den düşürüldü)
   bagging_fraction: 0.8              # Bootstrap sampling oranı
   bagging_freq: 1                    # Her iterasyonda bagging
-  
+
   # Evaluation
   metric: [ndcg, auc]                # İzlenen metrikler
   ndcg_eval_at: [5, 10]              # nDCG@5 ve nDCG@10
@@ -476,39 +525,50 @@ lgbm:
 ### 3.3. Parametre Tuning Mantığı
 
 #### Overfitting'i Önleme
+
 **Problem**: İlk denemelerde train AUC: 0.90, validation AUC: 0.78 (overfitting)
 
 **Çözümler**:
+
 1. **Learning rate düşürüldü** (0.05 → 0.03):
+   
    - Daha yavaş öğrenme
    - Daha stabil gradients
    - Better generalization
 
 2. **Regularization artırıldı** (lambda_l2: 0.1 → 0.5):
+   
    - Ağırlıklara penalty
    - Karmaşık modelleri cezalandır
 
 3. **Feature fraction azaltıldı** (0.8 → 0.7):
+   
    - Her ağaç feature'ların subset'ini görüyor
    - Ensemble diversity artıyor
 
 4. **Early stopping artırıldı** (80 → 100):
+   
    - Daha sabırlı
    - Overfitting'e izin vermeden optimum nokta
 
 #### Expressiveness Artırma
+
 **Problem**: Model yeterince karmaşık pattern'leri yakalayamıyor
 
 **Çözümler**:
+
 1. **Max depth artırıldı** (8 → 10):
+   
    - Daha derin ağaçlar
    - Daha karmaşık etkileşimler
 
 2. **Num leaves artırıldı** (128 → 256):
+   
    - Daha ince partition'lar
    - Better fit on training data
 
 3. **Num boost round artırıldı** (800 → 1200):
+   
    - Daha fazla iterasyon
    - Early stopping zaten var, fazladan zarar yok
 
@@ -517,28 +577,31 @@ lgbm:
 ### 3.4. Feature Engineering Detayları
 
 #### Categorical Features
+
 ```yaml
 cat_cols:
   - device_type          # mobile/desktop/tablet
 ```
 
 **Neden sadece 1 categorical?**
+
 - Impression_id, article_id, user_id: ID'ler, categorical olarak anlamsız
 - Diğer categoricals: Ordinal encode edildi (sentiment, article_type)
 - Device_type: Gerçek categorical (sıralama yok)
 
 #### Derived Features
+
 ```yaml
 # Multiplication features (interaction)
 mul_cols_dict:
   topics_sim_mul_a_total_inviews:
     - c_topics_count_svd_sim          # TF-IDF similarity
     - a_total_inviews                 # Popularity
-  
+
   topics_sim_mul_a_total_pageviews:
     - c_topics_count_svd_sim
     - a_total_pageviews
-  
+
   topics_sim_mul_c_time_min_diff:
     - c_topics_count_svd_sim
     - c_time_min_diff                 # Recency
@@ -548,17 +611,19 @@ div_cols_dict:
   c_time_min_diff_imp_rate:
     - c_time_min_diff                 # Absolute time
     - i_time_min_diff_mean            # Impression average
-  
+
   a_total_pageviews_imp_rate:
     - a_total_pageviews               # Article pageviews
     - i_total_pageviews_mean          # Impression average pageviews
 ```
 
 **Mantık**:
+
 - **Multiplication**: Feature interaction (similarity × popularity = "benzer VE popüler")
 - **Division**: Normalization (article metric / impression average = "bu impression'da ne kadar iyi?")
 
 #### Unused Columns
+
 ```yaml
 unuse_cols:
   - impression_id       # ID, model için anlamsız
@@ -589,11 +654,13 @@ test_df = validation_data[impression_id in validation_impression_ids[split_idx:]
 ```
 
 **Neden bu strateji?**
+
 - ✓ Gerçek dünya simülasyonu: Gelecek tahmini
 - ✓ Temporal leak prevention: Test setindeki impression'lar train'den sonra
 - ✓ Cold-start realistic: Yeni kullanıcılar ve makaleler
 
 **Trade-off**:
+
 - ✗ Graph methods için uygun değil (farklı kullanıcılar)
 - ✓ Production'a daha yakın (yeni kullanıcılar gelecek)
 
@@ -604,11 +671,13 @@ sampling_rate: 0.1        # Train verisinin %10'u
 ```
 
 **Neden sampling?**
+
 - **Computational efficiency**: Full train ~130M satır, sampling ile ~13M
 - **Iteration speed**: Model geliştirme hızlandı (1 saat → 10 dakika)
 - **Validation**: Small subset'te validate ettikten sonra full data'da test
 
 **Sampling yöntemi**: Impression-level random sampling
+
 ```python
 random.seed(cfg.exp.seed)
 train_impression_ids = sorted(train_df["impression_id"].unique())
@@ -619,6 +688,7 @@ use_train_impression_ids = random.sample(
 ```
 
 **Avantajlar**:
+
 - Impression bazlı → her impression'ın tüm candidates'leri korunuyor
 - Seed-based → Reproducible
 
@@ -643,12 +713,14 @@ os.environ['PYTHONHASHSEED'] = str(seed)
 ```
 
 **Multiple seed çalıştırma** (significance analysis için):
+
 ```bash
 # 3 farklı seed ile çalıştır
 run_multiple_seeds.bat medium067_001 7 42 123
 ```
 
 **Output organizasyonu**:
+
 ```
 output/experiments/015_train_third/
 ├── medium067_001_seed7_20251221_143045/
@@ -665,6 +737,7 @@ Her seed için ayrı klasör → karşılaştırma ve istatistiksel test için
 ### 5.1. TF-IDF'in Sınırlı Etkisi
 
 **SEBEP 1: Domain Dynamics**
+
 ```
 Haber yaşam döngüsü: [Publish] → [0-6h: peak] → [6-24h: decline] → [24h+: dead]
 
@@ -673,6 +746,7 @@ Haber yaşam döngüsü: [Publish] → [0-6h: peak] → [6-24h: decline] → [24
 ```
 
 **SEBEP 2: Behavioral Signals**
+
 ```
 Kullanıcı tıklama geçmişi:
 - Son 1 saatte kaç makale gördü?
@@ -684,6 +758,7 @@ Kullanıcı tıklama geçmişi:
 ```
 
 **SEBEP 3: Sparse User History**
+
 ```
 Ortalama kullanıcı: 5-10 makale okuyor
 TF-IDF profile: Az sayıda dokümandan oluşuyor
@@ -697,6 +772,7 @@ TF-IDF profile: Az sayıda dokümandan oluşuyor
 ### 5.2. Graph'ın Başarısızlığı
 
 **SEBEP 1: Dataset Split → Cold-Start**
+
 ```
 Time-based split seçimi:
   ↓
@@ -713,6 +789,7 @@ Model öğrenememiş → Performans düşüşü
 ```
 
 **SEBEP 2: Domain Nature → High Turnover**
+
 ```
 Haber domain özellikleri:
   ↓
@@ -727,6 +804,7 @@ Historical graph → Current prediction: Weak correlation
 ```
 
 **SEBEP 3: Sparse Interactions → Weak Embeddings**
+
 ```
 Bipartite graph density:
   ↓
@@ -746,6 +824,7 @@ Random walk'lar meaning ful path bulamıyor
 ### 5.3. Neden TF-IDF Yine de Kullanıyoruz?
 
 **SEBEP 1: Cold-Start Coverage**
+
 ```
 TF-IDF content-based:
   ↓
@@ -757,6 +836,7 @@ Yeni kullanıcılar için de çalışıyor (geçmiş profile üzerinden)
 ```
 
 **SEBEP 2: Incremental Gain**
+
 ```
 Baseline (temporal + behavioral): AUC 0.829
 + TF-IDF features: AUC 0.845
@@ -767,6 +847,7 @@ Küçük ama anlamlı kazanç
 ```
 
 **SEBEP 3: Low Cost**
+
 ```
 TF-IDF hesaplama: ~5 dakika (offline)
 Inference time: +0.01ms per prediction
@@ -775,6 +856,7 @@ Cost-benefit ratio iyi
 ```
 
 **SEBEP 4: Ensemble Benefit**
+
 ```
 Model ensembling theory:
   ↓
@@ -796,33 +878,39 @@ Synergy effects
 ### 6.1. Başarılı Yaklaşımlar
 
 **✓ Temporal Features** (En Güçlü)
+
 - `c_time_min_diff`: Makale ne kadar yeni?
 - Feature importance: %28.5
 - **Öneri**: Bu feature'ı mutlaka koru, daha fazla temporal feature eklenebilir
 
 **✓ Behavioral Features** (Çok Güçlü)
+
 - Kullanıcının son impression'larındaki davranışı
 - Makaleyi daha önce gördü mü?
 - Feature importance: %35 (toplamda)
 - **Öneri**: Real-time behavioral signals ekle (son 5 dakika, son 1 saat)
 
 **✓ TF-IDF Content Similarity** (Yardımcı)
+
 - Topics, title, body similarity
 - Feature importance: %8 (toplamda)
 - **Öneri**: Koru, ama daha fazla invest etme
 
 **✓ BERT Semantic Clustering** (Test ediliyor)
+
 - TF-IDF'ten daha iyi semantic understanding bekleniyor
 - **Öneri**: Test et, %5-7 gain hedefle
 
 ### 6.2. Başarısız Yaklaşımlar
 
 **✗ Graph-Based Embeddings**
+
 - Performance: -11.2% AUC
 - **Sonuç**: Kullanma
 - **Neden**: Cold-start coverage %10, domain dynamics uygun değil
 
 **✗ Graph Feature Selection**
+
 - Performance: Hala baseline'ın altında
 - **Sonuç**: Root cause çözmüyor, vazgeç
 
@@ -831,11 +919,13 @@ Synergy effects
 **Kısa Vadeli (1-2 hafta)**:
 
 1. **BERT Clustering Test**
+   
    - Full test ve evaluation yap
    - Baseline'la karşılaştır
    - %5+ gain ise production'a al
 
 2. **Hyperparameter Tuning**
+   
    ```yaml
    # Denenecek değerler
    learning_rate: [0.01, 0.03, 0.05]
@@ -843,10 +933,12 @@ Synergy effects
    num_leaves: [256, 512]
    lambda_l2: [0.3, 0.5, 0.7]
    ```
+   
    - Bayesian optimization kullan
    - Target: +2-3% gain
 
 3. **Feature Engineering**
+   
    - Daha fazla temporal feature:
      - `publish_hour`, `publish_day_of_week`
      - `time_since_last_click`
@@ -857,11 +949,13 @@ Synergy effects
 **Orta Vadeli (1 ay)**:
 
 4. **Ensemble Methods**
+   
    - LightGBM + CatBoost ensemble
    - Stacking with linear meta-learner
    - Target: +3-5% gain
 
 5. **Neural Network Ranker**
+   
    - DeepFM veya Wide & Deep
    - Embeddings + behavioral features
    - Benchmark against LightGBM
@@ -869,11 +963,13 @@ Synergy effects
 **Uzun Vadeli (2-3 ay)**:
 
 6. **Real-time Features**
+   
    - Streaming features (son 5 dakika davranış)
    - Real-time popularity signals
    - Requires infrastructure change
 
 7. **User Cold-Start Strategy**
+   
    - Yeni kullanıcılar için özel model
    - Content-only model → Hybrid model transition
    - Adaptive weighting
@@ -896,11 +992,13 @@ Key packages:
 ### 7.2. Run Commands
 
 **Single run**:
+
 ```bash
 run.bat train --exp=medium067_001 --seed=7
 ```
 
 **Multiple seeds** (significance testing):
+
 ```bash
 run_multiple_seeds.bat medium067_001 7 42 123
 ```
@@ -942,6 +1040,7 @@ Test Set:
 **Ders**: Algoritma seçiminde domain özelliklerini anlamak şart.
 
 **Örnek**: 
+
 - Academic papers: "Graph embeddings work great for recommendations"
 - Bizim domain: "Haber çok hızlı değişiyor, graph static kalmış"
 - **Sonuç**: Paper'da iyi ≠ Bizim problem'de iyi
@@ -951,6 +1050,7 @@ Test Set:
 **Ders**: Cold-start'tan kaçınmak, çözmekten daha kolay.
 
 **Örnek**:
+
 - Graph: Cold-start'ı çözmek için embedding learning
 - TF-IDF: Cold-start yok, çünkü content-based
 - **Sonuç**: Prevention-first approach kazandı
@@ -960,6 +1060,7 @@ Test Set:
 **Ders**: Model debugging ve improvement için interpretability şart.
 
 **Örnek**:
+
 - Graph başarısız olunca: Feature importance sayesinde hızlıca anladık
 - LightGBM: Hangi features önemli açıkça görülüyor
 - Neural network olsaydı: Debug etmek daha zor olurdu
@@ -969,6 +1070,7 @@ Test Set:
 **Ders**: Haber domain'inde "ne zaman" "ne" den önemli.
 
 **Örnek**:
+
 - Graph: "Bu makaleyi okuyanlar bunları da okudu" (structural)
 - Temporal: "Son 1 saatte yayınlanan en popüler" (temporal)
 - **Sonuç**: Temporal features %28.5, graph %0 importance
@@ -978,6 +1080,7 @@ Test Set:
 **Ders**: Birçok küçük improvement > Tek büyük breakthrough
 
 **Timeline**:
+
 ```
 Week 1: Baseline → AUC 0.78
 Week 2: + Temporal features → AUC 0.82 (+4%)
@@ -1025,27 +1128,30 @@ c_time_min_diff_imp_rate, ...
 
 ### Ek B: Deneysel Sonuçlar Tablosu
 
-| Experiment | Config | AUC | nDCG@10 | MRR | Note |
-|------------|--------|-----|---------|-----|------|
-| Baseline | 103 features | 0.845 | 0.730 | 0.651 | ✓ Best |
-| + Graph (all) | 234 features | 0.730 | 0.604 | 0.495 | ✗ -11.6% |
-| + Graph (top-20) | 123 features | 0.753 | 0.624 | 0.522 | ✗ -9.2% |
-| + BERT (pending) | 136 features | TBD | TBD | TBD | Testing |
+| Experiment       | Config       | AUC   | nDCG@10 | MRR   | Note     |
+| ---------------- | ------------ | ----- | ------- | ----- | -------- |
+| Baseline         | 103 features | 0.845 | 0.730   | 0.651 | ✓ Best   |
+| + Graph (all)    | 234 features | 0.730 | 0.604   | 0.495 | ✗ -11.6% |
+| + Graph (top-20) | 123 features | 0.753 | 0.624   | 0.522 | ✗ -9.2%  |
+| + BERT (pending) | 136 features | TBD   | TBD     | TBD   | Testing  |
 
 ### Ek C: Computational Requirements
 
 **Training Time**:
+
 - Full data (~130M rows): ~6 saat
 - Sampled data (%10, ~13M rows): ~35 dakika
 - Graph embedding (Node2Vec): +2 saat (unused)
 - BERT clustering: +1 saat (testing)
 
 **Memory**:
+
 - Peak RAM: ~32GB (full data)
 - Peak RAM: ~8GB (sampled data)
 - LightGBM model size: ~150MB
 
 **Infrastructure**:
+
 - CPU: 40 cores kullanılıyor
 - GPU: Kullanılmıyor (LightGBM CPU-only)
 - Storage: ~50GB (preprocessed features)
