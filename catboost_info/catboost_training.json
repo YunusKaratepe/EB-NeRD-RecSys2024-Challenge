@@ -1,0 +1,6 @@
+{
+"meta":{"test_sets":[],"test_metrics":[],"learn_metrics":[],"launch_mode":"Train","parameters":"","iteration_count":9,"learn_sets":["learn"],"name":"experiment"},
+"iterations":[
+{"iteration":0,"passed_time":0.239940965,"remaining_time":1.91952772},
+{"iteration":8,"passed_time":2.122151401,"remaining_time":0}
+]}

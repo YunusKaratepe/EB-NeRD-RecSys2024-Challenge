@@ -3,3 +3,6 @@ ebnerd_large/
 ebnerd_small/
 *.parquet
 *.zip
+input/
+output/
+.conda
