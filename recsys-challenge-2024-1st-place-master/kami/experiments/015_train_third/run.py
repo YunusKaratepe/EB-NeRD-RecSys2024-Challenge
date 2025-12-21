@@ -303,20 +303,24 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 
             )
             
-            # Split validation into validation and test (50/50)
+            # Split validation into validation and test (50/50) BY TIME
             print(f"Original validation shape: {full_validation_df.shape}")
-            random.seed(cfg.exp.seed)
-            all_validation_impression_ids = sorted(
-                full_validation_df["impression_id"].unique().to_list()
-            )
             
-            if cfg.exp.sampling_rate:
-                all_validation_impression_ids = random.sample(
-                    all_validation_impression_ids,
-                    int(len(all_validation_impression_ids) * cfg.exp.sampling_rate),
-                )
+            # Get impression_ids from loaded data
+            impression_ids = full_validation_df["impression_id"].unique().to_list()
             
-            # Split 50/50
+            # Load behaviors to get impression_time
+            behaviors_path = Path(cfg.dir.input_dir) / f"ebnerd_{cfg.exp.size_name}" / "validation" / "behaviors.parquet"
+            behaviors_df = pl.read_parquet(behaviors_path).select(["impression_id", "impression_time"])
+            
+            # Sort by time
+            impression_time_df = behaviors_df.filter(
+                pl.col("impression_id").is_in(impression_ids)
+            ).sort("impression_time")
+            
+            all_validation_impression_ids = impression_time_df["impression_id"].to_list()
+            
+            # Split 50/50 by time (first 50% = validation, second 50% = test)
             split_idx = len(all_validation_impression_ids) // 2
             validation_impression_ids = all_validation_impression_ids[:split_idx]
             test_impression_ids = all_validation_impression_ids[split_idx:]
@@ -480,20 +484,25 @@ def main_stage(cfg: DictConfig, output_path) -> None:
             bst = pickle.load(f)["model"]
 
         with utils.trace("predict validation and test"):
-            # Recreate the same split
+            # Recreate the same split BY TIME
             full_validation_df = pl.read_parquet(
                 str(dataset_path / size_name / "validation_dataset.parquet"),
             )
             
-            random.seed(cfg.exp.seed)
-            all_validation_impression_ids = sorted(
-                full_validation_df["impression_id"].unique().to_list()
-            )
-            if cfg.exp.sampling_rate:
-                all_validation_impression_ids = random.sample(
-                    all_validation_impression_ids,
-                    int(len(all_validation_impression_ids) * cfg.exp.sampling_rate),
-                )
+            # Get impression_ids from loaded data
+            impression_ids = full_validation_df["impression_id"].unique().to_list()
+            
+            # Load behaviors to get impression_time
+            behaviors_path = Path(cfg.dir.input_dir) / f"ebnerd_{cfg.exp.size_name}" / "validation" / "behaviors.parquet"
+            behaviors_df = pl.read_parquet(behaviors_path).select(["impression_id", "impression_time"])
+            
+            # Sort by time
+            impression_time_df = behaviors_df.filter(
+                pl.col("impression_id").is_in(impression_ids)
+            ).sort("impression_time")
+            
+            all_validation_impression_ids = impression_time_df["impression_id"].to_list()
+            
             split_idx = len(all_validation_impression_ids) // 2
             validation_impression_ids = all_validation_impression_ids[:split_idx]
             test_impression_ids = all_validation_impression_ids[split_idx:]
@@ -576,20 +585,25 @@ def main_stage(cfg: DictConfig, output_path) -> None:
 
     if "eval" in cfg.exp.first_modes:
         with utils.trace("load datasets"):
-            # Recreate the same split
+            # Recreate the same split BY TIME
             full_validation_df = pl.read_parquet(
                 str(dataset_path / size_name / "validation_dataset.parquet"),
             )
             
-            random.seed(cfg.exp.seed)
-            all_validation_impression_ids = sorted(
-                full_validation_df["impression_id"].unique().to_list()
-            )
-            if cfg.exp.sampling_rate:
-                all_validation_impression_ids = random.sample(
-                    all_validation_impression_ids,
-                    int(len(all_validation_impression_ids) * cfg.exp.sampling_rate),
-                )
+            # Get impression_ids from loaded data
+            impression_ids = full_validation_df["impression_id"].unique().to_list()
+            
+            # Load behaviors to get impression_time
+            behaviors_path = Path(cfg.dir.input_dir) / f"ebnerd_{cfg.exp.size_name}" / "validation" / "behaviors.parquet"
+            behaviors_df = pl.read_parquet(behaviors_path).select(["impression_id", "impression_time"])
+            
+            # Sort by time
+            impression_time_df = behaviors_df.filter(
+                pl.col("impression_id").is_in(impression_ids)
+            ).sort("impression_time")
+            
+            all_validation_impression_ids = impression_time_df["impression_id"].to_list()
+            
             split_idx = len(all_validation_impression_ids) // 2
             validation_impression_ids = all_validation_impression_ids[:split_idx]
             test_impression_ids = all_validation_impression_ids[split_idx:]

@@ -3,7 +3,7 @@ from invoke import task
 
 
 @task
-def create_candidates(ctx, debug=False):
+def create_candidates(ctx, debug=False, exp=None):
     # Skip test_demo - only needed for test set predictions
     # ctx.run("python preprocess/test_demo/run.py")
     scripts = [
@@ -11,7 +11,9 @@ def create_candidates(ctx, debug=False):
     ]
     for script in scripts:
         cmd = f"python {script}"
-        if debug:
+        if exp:
+            cmd += f" exp={exp}"
+        elif debug:
             cmd += " exp=small"
         else:
             cmd += " exp=large"
@@ -19,7 +21,7 @@ def create_candidates(ctx, debug=False):
         ctx.run(cmd)
 
 @task
-def create_features(ctx, debug=False):
+def create_features(ctx, debug=False, exp=None):
     scripts = [
         "features/ua_topics_sim_count_svd_feat/run.py",
         "features/a_base/run.py",
@@ -51,7 +53,9 @@ def create_features(ctx, debug=False):
     for script in scripts:
         print("*"*20)
         cmd = f"python {script}"
-        if debug:
+        if exp:
+            cmd += f" exp={exp}"
+        elif debug:
             cmd += " exp=small"
         else:
             cmd += " exp=large"
@@ -60,14 +64,16 @@ def create_features(ctx, debug=False):
         print()
 
 @task
-def create_datasets(ctx, debug=False):
+def create_datasets(ctx, debug=False, exp=None):
     scripts = [
         "preprocess/dataset067/run.py",
     ]
     for script in scripts:
         print("*"*20)
         cmd = f"python {script}"
-        if debug:
+        if exp:
+            cmd += f" exp={exp}"
+        elif debug:
             cmd += " exp=small"
         else:
             cmd += " exp=large"
@@ -76,17 +82,19 @@ def create_datasets(ctx, debug=False):
         print()
 
 @task
-def train(ctx, debug=False):
+def train(ctx, debug=False, exp=None):
     scripts = [
         ("experiments/015_train_third/run.py", '067_001'),
         # ("experiments/016_catboost/run.py", '067'),  # Disabled - only using LightGBM
     ]
-    for script, exp in scripts:
+    for script, exp_suffix in scripts:
         print("*"*20)
-        if debug:
-            cmd = f"python {script} exp=small{exp} debug=True"
+        if exp:
+            cmd = f"python {script} exp={exp} debug=True"
+        elif debug:
+            cmd = f"python {script} exp=small{exp_suffix} debug=True"
         else:
-            cmd = f"python {script} exp=large{exp} debug=True" # remove `debug=True` when you want to use wandb
+            cmd = f"python {script} exp=large{exp_suffix} debug=True" # remove `debug=True` when you want to use wandb
         print(cmd)
         ctx.run(cmd)
         print()

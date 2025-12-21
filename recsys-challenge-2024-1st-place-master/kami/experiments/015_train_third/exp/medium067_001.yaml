@@ -1,0 +1,43 @@
+defaults:
+  - base@_here_ 
+
+sampling_rate: 0.1
+size_name: medium
+dataset_path: output/preprocess/dataset067
+use_auc: false
+
+# Graph-based feature extraction settings
+use_graph_features: false  # Graph features degrade performance significantly - keep disabled
+graph_include_embeddings: false  # Set to true to add all 128 embedding dimensions
+graph_embedding_dim: 64
+graph_walk_length: 30
+graph_num_walks: 200
+graph_workers: 4
+
+# Semantic clustering feature extraction settings (BERT-based)
+use_semantic_clusters: true  # Enable semantic cluster features
+semantic_n_clusters: 30  # Number of semantic clusters (K)
+semantic_text_column: title  # Which text to use: title, body, or subtitle
+
+lgbm:
+  num_boost_round: 1200  # Increased from 800 - more iterations for slower learning
+  early_stopping_round: 100  # Increased from 80 - even more patient
+  verbose_eval: 10
+  params:
+    learning_rate: 0.03  # Decreased from 0.05 - slower, more careful learning
+    max_depth: 10  # Increased from 8 - deeper trees for more complex patterns
+    lambda_l2: 0.5  # Increased from 0.1 - stronger regularization to prevent overfitting
+    feature_fraction: 0.7  # Decreased from 0.8 - use fewer features per tree
+    num_leaves: 256  # Increased from 128 - more leaf nodes for better expressiveness
+  unuse_cols: 
+    - impression_id
+    - article_id
+    - user_id
+    - label
+  mul_cols_dict: 
+    topics_sim_mul_a_total_inviews: ['c_topics_count_svd_sim', 'a_total_inviews']
+    topics_sim_mul_a_total_pageviews: ['c_topics_count_svd_sim', 'a_total_pageviews']
+    topics_sim_mul_c_time_min_diff: ['c_topics_count_svd_sim', 'c_time_min_diff']
+  div_cols_dict:
+    c_time_min_diff_imp_rate: ['c_time_min_diff', 'i_time_min_diff_mean']
+    a_total_pageviews_imp_rate: ['a_total_pageviews', 'i_total_pageviews_mean']
