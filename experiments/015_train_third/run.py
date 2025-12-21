@@ -419,8 +419,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                     semantic_extractor.load_model(semantic_model_path)
                 else:
                     logger.info("Training new semantic cluster model...")
-                    # Load articles dataset
-                    articles_path = Path("input/ebnerd_testset/ebnerd_testset") / "articles.parquet"
+                    # Load articles dataset based on size
+                    articles_path = Path(cfg.dir.input_dir) / f"ebnerd_{size_name}" / "articles.parquet"
                     if not articles_path.exists():
                         logger.warning(f"Articles file not found: {articles_path}")
                         logger.warning("Skipping semantic cluster feature extraction")
@@ -445,8 +445,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 
                 # Add semantic cluster features to datasets
                 if 'semantic_extractor' in locals():
-                    # Load history for user profiling
-                    history_path = dataset_path / size_name / "train" / "history.parquet"
+                    # Load history for user profiling from original dataset
+                    history_path = Path(cfg.dir.input_dir) / f"ebnerd_{size_name}" / "train" / "history.parquet"
                     if history_path.exists():
                         history_df = pl.read_parquet(history_path)
                     else:
