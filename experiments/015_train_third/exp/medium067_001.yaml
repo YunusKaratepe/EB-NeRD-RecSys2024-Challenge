@@ -1,6 +1,7 @@
 defaults:
   - base@_here_ 
 
+seed: 7  # Can override with exp.seed=42 on command line
 sampling_rate: 0.1
 size_name: medium
 dataset_path: output/preprocess/dataset067

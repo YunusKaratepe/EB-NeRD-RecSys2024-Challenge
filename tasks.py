@@ -82,7 +82,7 @@ def create_datasets(ctx, debug=False, exp=None):
         print()
 
 @task
-def train(ctx, debug=False, exp=None):
+def train(ctx, debug=False, exp=None, seed=None):
     scripts = [
         ("experiments/015_train_third/run.py", '067_001'),
         # ("experiments/016_catboost/run.py", '067'),  # Disabled - only using LightGBM
@@ -95,6 +95,11 @@ def train(ctx, debug=False, exp=None):
             cmd = f"python {script} exp=small{exp_suffix} debug=True"
         else:
             cmd = f"python {script} exp=large{exp_suffix} debug=True" # remove `debug=True` when you want to use wandb
+        
+        # Add seed parameter if provided
+        if seed is not None:
+            cmd += f" exp.seed={seed}"
+        
         print(cmd)
         ctx.run(cmd)
         print()

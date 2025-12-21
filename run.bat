@@ -8,4 +8,4 @@ REM Example: run.bat create-datasets --debug
 cd /d "%~dp0"
 set PYTHONPATH=%~dp0
 call conda activate "../../.conda"
-"d:\ITU\phd\data-mining\project\EB-NeRD\.conda\python.exe" -m invoke %*
+".conda/python.exe" -m invoke %*

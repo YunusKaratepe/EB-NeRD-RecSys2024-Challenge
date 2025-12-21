@@ -10,6 +10,7 @@ import os
 import pickle
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import hydra
@@ -274,6 +275,14 @@ def make_result_df(df: pl.DataFrame, pred: np.ndarray):
 
 def main_stage(cfg: DictConfig, output_path) -> None:
     print("main_stage")
+    
+    # Set all random seeds for reproducibility
+    seed = cfg.exp.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    logger.info(f"Set random seed to {seed} for reproducibility")
+    
     dataset_path = Path(cfg.exp.dataset_path)
 
     size_name = cfg.exp.size_name
@@ -752,8 +761,13 @@ def main(cfg: DictConfig) -> None:
     runtime_choices = HydraConfig.get().runtime.choices
     exp_name = f"{Path(sys.argv[0]).parent.name}/{runtime_choices.exp}"
 
+    # Add timestamp and seed to output path
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    seed = cfg.exp.seed
+    exp_name_with_meta = f"{exp_name}_seed{seed}_{timestamp}"
+
     print(f"exp_name: {exp_name}")
-    output_path = Path(cfg.dir.exp_dir) / exp_name
+    output_path = Path(cfg.dir.exp_dir) / exp_name_with_meta
     print(f"ouput_path: {output_path}")
     os.makedirs(output_path, exist_ok=True)
 
