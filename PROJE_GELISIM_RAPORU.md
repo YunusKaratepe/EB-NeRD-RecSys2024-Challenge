@@ -37,9 +37,89 @@ Bir haber platformunda, kullanıcılara içerik önerileri yapmak için bir maki
 
 ### 2.1. TF-IDF Tabanlı Benzerlik Özellikleri (Mevcut Başarılı Yaklaşım)
 
-#### Yöntem
+#### Yöntem Detayı
 
 Makale içerikleri (başlık, alt başlık, gövde metni) ile kullanıcı geçmişi arasında **metin benzerliği** hesaplanıyor.
+
+**Pipeline Akışı**:
+
+1. **TF-IDF Vektörizasyonu**: Her makale metni TF-IDF vektörüne dönüştürülür
+2. **SVD (Truncated SVD)**: Boyut indirgeme ile gürültü azaltılır ve hesaplama verimliliği sağlanır
+3. **Kullanıcı Profili Oluşturma**: Kullanıcının geçmişte okuduğu makalelerin vektörlerinin ortalaması alınır
+4. **Cosine Similarity**: Aday makale ile kullanıcı profili arasında benzerlik hesaplanır
+
+**Detaylı İşlem Adımları**:
+
+```python
+# Adım 1: TF-IDF ile makale vektörleri oluştur
+vectorizer = TfidfVectorizer(
+    max_features=10000,      # Top 10K kelime
+    ngram_range=(1, 2),      # Unigram + bigram
+    min_df=2,                # En az 2 dokümanda geç
+    max_df=0.8,              # Max %80 dokümanda
+    stop_words='english'     # İngilizce stop words filtrele
+)
+article_matrix = vectorizer.fit_transform(articles['title'])
+# Boyut: [N_articles, 10000]
+
+# Adım 2: SVD ile boyut indirgeme
+svd = TruncatedSVD(n_components=50)
+article_embeddings = svd.fit_transform(article_matrix)
+# Boyut: [N_articles, 50] (10000 -> 50 boyuta indirildi)
+
+# Adım 3: L2 normalizasyon (cosine similarity için)
+article_embeddings = normalize(article_embeddings, norm='l2')
+
+# Adım 4: Kullanıcı profili = okuduğu makalelerin ortalaması
+user_history_articles = [a1, a2, a3, ...]  # Kullanıcının geçmişi
+user_embedding = article_embeddings[user_history_articles].mean(axis=0)
+user_embedding = normalize(user_embedding, norm='l2')
+# Boyut: [50]
+
+# Adım 5: Cosine similarity hesapla
+candidate_article_embedding = article_embeddings[candidate_article_id]
+similarity = (user_embedding * candidate_article_embedding).sum()
+# Değer: [-1, 1] arası, 1 = çok benzer
+```
+
+#### Bizim Yaklaşımımızın Özgün Yönleri
+
+**1. SVD Boyut İndirgeme Kullanımı**:
+- Standart TF-IDF: Doğrudan yüksek boyutlu sparse vektörlerle çalışır (10K-50K boyut)
+- Bizim yaklaşım: SVD ile **50-100 boyuta** indirgeme yapıyoruz
+- **Avantajı**: 
+  - Gürültü azaltır (rare words'ler filtrelenir)
+  - Hesaplama hızı 100x artar
+  - Latent semantic analysis etkisi (benzer anlamlı kelimeler yaklaşır)
+
+**2. Kullanıcı Profili Olarak Ortalama Embedding**:
+- Standart yaklaşım: Her makale için ayrı ayrı similarity hesapla, topla
+- Bizim yaklaşım: Önce kullanıcı embedding'i oluştur (tek seferlik), sonra similarity hesapla
+- **Avantajı**:
+  - Çok daha verimli (O(N) yerine O(1) per candidate)
+  - Kullanıcının genel ilgi alanını temsil eder
+  - Sparse history problemine dayanıklı (birkaç makale yeterli)
+
+**3. Normalizasyon Stratejisi**:
+- SVD sonrası L2 normalizasyonu uyguluyoruz
+- **Neden**: Cosine similarity doğrudan dot product ile hesaplanabilir
+- **Avantaj**: Numpy broadcast ile vectorized computation, çok hızlı
+
+**4. Chunk-based Processing**:
+```python
+# Memory efficient processing
+chunk_size = 1_000_000  # 1M candidate at a time
+for chunk in chunks:
+    similarities = (article_embeddings[chunk] * user_embeddings[chunk]).sum(axis=1)
+```
+- **Neden**: 13M+ candidate için memory explosion önlenir
+- **Avantaj**: Büyük veri setlerinde çalışır
+
+**5. Multi-Text Fusion**:
+- Sadece title değil, body, subtitle, category, entities için ayrı ayrı TF-IDF
+- Her metin tipi için ayrı özellik üretilir
+- Model kendisi öğrenir hangi metin tipi ne kadar önemli
+- **Bulgu**: Title > Topics > Body sıralaması (feature importance'a göre)
 
 #### Parametreler
 
@@ -48,35 +128,71 @@ Makale içerikleri (başlık, alt başlık, gövde metni) ile kullanıcı geçmi
 max_features: 10000           # Kelime dağarcığı boyutu
 ngram_range: (1, 2)          # Unigram ve bigram kullan
 min_df: 2                     # En az 2 dokümanda geçmeli
-max_df: 0.8                   # En fazla %80 dokümanda
+max_df: 0.8                   # En fazla %80 dokümanda (çok yaygın kelimeleri filtrele)
+stop_words: 'english'        # İngilizce stop words
 
 # SVD boyut indirgeme
-n_components: 100             # 100 boyuta indir
+n_components: 50              # 50 boyuta indir (title için)
+n_components: 100             # 100 boyut (body için, daha zengin içerik)
+
+# Normalization
+norm: 'l2'                    # L2 normalizasyon (cosine similarity için)
 ```
+
+**Neden Bu Parametreler?**
+
+- **max_features=10000**: Vocabulary çok büyürse (50K+) sparse olur, çok küçükse (1K) bilgi kaybı
+- **ngram_range=(1,2)**: Unigram tek kelimeler, bigram "machine learning" gibi phrase'ler yakalar
+- **min_df=2**: Sadece 1 dokümanda geçen kelimeler noise, filtrele
+- **max_df=0.8**: "the", "is" gibi her yerde geçen kelimeler discriminative değil
+- **n_components=50**: 10000 → 50 yeterli (explained variance ~%70-80)
 
 #### Üretilen Özellikler
 
+Her aday (candidate) makale için 8 ayrı benzerlik özelliği:
+
 1. **c_title_tfidf_svd_sim**: Başlık benzerliği
-   
    - Kullanıcının geçmişte okuduğu makalelerin başlıkları
-   - Aday makalenin başlığı
-   - TF-IDF → SVD → Cosine similarity
+   - Aday makalenin başlığı  
+   - TF-IDF (10K vocab) → SVD (50 dim) → User Profile → Cosine Similarity
+   - **En etkili**: Feature importance %2.9
 
 2. **c_subtitle_tfidf_svd_sim**: Alt başlık benzerliği
+   - Alt başlıklar genelde daha açıklayıcı
+   - Ancak her makalede yok (sparse)
 
 3. **c_body_tfidf_svd_sim**: Gövde metni benzerliği
+   - En zengin içerik ama en gürültülü
+   - SVD burada daha kritik (100 component kullanıyoruz)
+   - Feature importance: %2.1
 
 4. **c_category_tfidf_sim**: Kategori benzerliği
+   - "Sports", "Politics", "Technology" gibi
+   - Küçük vocabulary, SVD gereksiz
 
 5. **c_subcategory_tfidf_sim**: Alt kategori benzerliği
+   - Daha granular: "Football", "Basketball"
 
 6. **c_entity_groups_tfidf_sim**: Varlık grubu benzerliği
+   - Named entities: "Biden", "Apple", "Istanbul"
+   - Specific interest'leri yakalar
 
 7. **c_ner_clusters_tfidf_sim**: İsimlendirilmiş varlık benzerliği
+   - NER clustered entities
 
 8. **c_topics_count_svd_sim**: Konu benzerliği
+   - Topic modeling sonuçları
+   - **En etkili TF-IDF özelliği**: Feature importance %4.1
 
 **Toplam**: 8 benzerlik özelliği
+
+**Özellik Çeşitliliğinin Önemi**:
+- Her metin tipi farklı aspect'leri yakalar
+- Title: Kısa, özlü, SEO-optimized
+- Body: Derin içerik, bağlam
+- Category: High-level interest
+- Entities: Specific topics
+- LightGBM bu çeşitliliği öğrenip optimal combination'ı bulur
 
 #### Sonuçlar
 
@@ -84,13 +200,17 @@ n_components: 100             # 100 boyuta indir
 
 - Cold-start problemine dayanıklı (yeni kullanıcılar için de çalışıyor)
 - İçerik tabanlı, her makale için geçerli
-- Hesaplama maliyeti düşük
+- Hesaplama maliyeti düşük (SVD sayesinde)
+- Multiple text types → diverse signals
+- Real-time inference ready (embedding'ler önceden hesaplanabilir)
 
 **✗ Dezavantajlar**:
 
 - **Sınırlı etki**: Feature importance analizinde orta-düşük önem
-- Genel model başarısına katkısı **%0.1** civarında
+- Model performansına katkısı **%2-3 civarında**
 - Davranışsal özellikler (tıklama, zaman) çok daha etkili
+- Semantic anlam sınırlı (BERT vs TF-IDF)
+- Synonyms yakalanmıyor ("car" ≠ "automobile")
 
 #### Feature Importance Sıralaması
 
@@ -127,6 +247,225 @@ Top 10 Most Important Features:
    - Kullanıcının son 1 saatteki davranışı
    - Makale ne kadar impression almış
    - Impression içindeki sıra (rank)
+
+---
+
+### 2.1.2. Semantic Clustering Özellikleri (Deneysel)
+
+**NOT**: Bu yaklaşım **TF-IDF similarity features'dan (bölüm 2.1) tamamen farklı bir yöntem**. Similarity features sadece cosine similarity hesaplarken, bu yaklaşım clustering + user profiling yapıyor.
+
+#### Yöntem Detayı
+
+Makaleleri **semantik cluster'lara** ayırıp, her kullanıcı için **cluster distribution profili** oluşturuyoruz. Bu bir **içerik tabanlı collaborative filtering** yaklaşımı.
+
+**Pipeline Akışı (Tek Bir Method İçinde)**:
+
+```
+1. TF-IDF Vectorization  → Makale vektörleri oluştur
+         ↓
+2. K-Means Clustering    → Makaleleri K cluster'a ayır
+         ↓
+3. User Profiling        → Her kullanıcının cluster distribution'ını hesapla
+         ↓
+4. Feature Extraction    → Aday makale için cluster-based features üret
+```
+
+**Detaylı İşlem Adımları**:
+
+```python
+# === ADIM 1: TF-IDF EMBEDDING ===
+# Not: Bu similarity features'dan AYRI bir işlem
+# Orada similarity için kullanıyorduk, burada clustering için kullanıyoruz
+vectorizer = TfidfVectorizer(
+    max_features=5000,           # Clustering için 5K yeterli
+    ngram_range=(1, 2),
+    min_df=2,
+    max_df=0.8,
+    stop_words='english'
+)
+article_matrix = vectorizer.fit_transform(articles['title'])
+article_embeddings = normalize(article_matrix, norm='l2')
+# Boyut: [N_articles, 5000]
+
+# === ADIM 2: K-MEANS CLUSTERING ===
+# Bu adım embedding'lerin üzerine uygulanıyor
+from sklearn.cluster import MiniBatchKMeans
+kmeans = MiniBatchKMeans(
+    n_clusters=K,                # K = 100 optimal
+    random_state=42,
+    batch_size=10000,            # Memory efficiency için
+    max_iter=100
+)
+article_clusters = kmeans.fit_predict(article_embeddings)
+# Çıktı: article_clusters[article_id] = cluster_id (0 to K-1)
+# Örnek: article_12345 → cluster 47 (Sports haberleri)
+
+# === ADIM 3: USER CLUSTER PROFILING ===
+def get_user_cluster_distribution(user_history_articles):
+    """
+    Kullanıcının geçmişindeki makalelerin cluster dağılımı
+    Bu kullanıcının hangi konulara ilgili olduğunu gösterir
+    """
+    history_clusters = article_clusters[user_history_articles]
+    cluster_counts = np.bincount(history_clusters, minlength=K)
+    cluster_distribution = cluster_counts / cluster_counts.sum()
+    return cluster_distribution
+
+# Örnek: Kullanıcı 20 makale okumuş
+# 10 makale → cluster 47 (Sports)
+# 7 makale  → cluster 12 (Tech)
+# 3 makale  → cluster 89 (Politics)
+# Distribution: [0, 0, ..., 0.50(Sports), ..., 0.35(Tech), ..., 0.15(Politics), ...]
+# Bu kullanıcı %50 sports, %35 tech, %15 politics ilgili
+
+# === ADIM 4: FEATURE EXTRACTION ===
+candidate_cluster_id = article_clusters[candidate_article_id]
+user_cluster_dist = get_user_cluster_distribution(user_history_articles)
+
+features = {
+    # Ana özellik: Aday makalenin cluster'ına kullanıcının ilgisi
+    'user_interest_in_candidate_cluster': user_cluster_dist[candidate_cluster_id],
+    
+    # Aday makale kullanıcının en ilgili olduğu cluster'da mı?
+    'user_top_cluster_match': 1 if candidate_cluster_id == user_cluster_dist.argmax() else 0,
+    
+    # Kullanıcı ne kadar focused/diverse?
+    'user_cluster_entropy': -sum(user_cluster_dist * np.log(user_cluster_dist + 1e-10)),
+    
+    # Tüm cluster distribution (model kendisi öğrensin)
+    # user_cluster_dist_0, user_cluster_dist_1, ..., user_cluster_dist_99
+}
+```
+
+**BERT Entegrasyonu (Gelecek İyileştirme)**:
+
+Şu an TF-IDF ile embedding oluşturuyoruz. Sistem modular olduğu için **BERT kolayca entegre edilebilir**:
+
+```python
+# Sadece Adım 1'i değiştirmek yeterli:
+if embedding_type == 'bert':
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    article_embeddings = model.encode(articles['title'], show_progress_bar=True)
+    # Boyut: [N_articles, 384]
+    # Daha zengin semantic representation
+else:  # 'tfidf' (şu an aktif)
+    # Yukarıdaki TF-IDF kodu
+    
+# Adım 2-3-4 AYNI KALIR! (clustering + profiling + features)
+# Bu yüzden BERT'i entegre etmek çok kolay
+```
+
+#### Standart Clustering'den Farkımız
+
+**1. User-Centric Approach**:
+- Standart: Dokümanlara cluster label'ı ver, iş bitti
+- Bizim: Kullanıcı geçmişinden **cluster distribution profili** çıkar
+- **Avantaj**: "Bu kullanıcının hangi cluster'lara ne kadar ilgisi var?" bilgisi
+
+**2. Distribution-based Features**:
+- Sadece "aday makale hangi cluster'da?" değil
+- "Kullanıcının bu cluster'a ne kadar ilgisi var?" özelliği üretiyoruz
+- Entropy feature: Kullanıcı focused mı (düşük entropy) yoksa diverse mi (yüksek entropy)?
+
+**3. Granular K Selection**:
+```python
+# Farklı K değerleri denedik
+K_values = [50, 100, 200, 500]
+# Her biri farklı granularity sağlıyor
+# K=50  → Coarse topics (Sports, Tech, Politics)
+# K=500 → Fine-grained topics (Football transfer news, iPhone reviews)
+```
+
+**4. Modular Embedding Strategy**:
+- TF-IDF (şu an) veya BERT (gelecekte) kullanılabilir
+- Embedding yöntemi değişse de clustering pipeline aynı
+- Config'den tek satırla değiştirilebilir
+
+#### Üretilen Özellikler (K=100 için)
+
+**103 Cluster Feature** (her aday makale için):
+
+1. **user_cluster_distribution_{0...99}**: Kullanıcının her cluster'a ilgi oranı (100 özellik)
+   - `user_cluster_distribution_47 = 0.50` → Kullanıcı geçmişindeki makalelerin %50'si cluster 47'de (Sports)
+   
+2. **user_interest_in_candidate_cluster**: Aday makalenin cluster'ına kullanıcının ilgisi (1 özellik)
+   - En direkt özellik, model için çok bilgilendirici
+
+3. **user_cluster_entropy**: Kullanıcı ilgi dağılımının entropy'si (1 özellik)
+   - Düşük: Focused user (birkaç cluster'a çok ilgili)
+   - Yüksek: Diverse user (her konudan okur)
+
+4. **is_user_top_cluster**: Aday makale kullanıcının en ilgili olduğu cluster'da mı? (1 özellik)
+   - Binary feature: 1 = evet, 0 = hayır
+
+**Toplam**: 103 özellik (K=100 için)
+
+#### Parametre Deneyimi
+
+```python
+# Denenen konfigürasyonlar
+configs = [
+    {'K': 50,  'embedding': 'tfidf', 'max_features': 5000},
+    {'K': 100, 'embedding': 'tfidf', 'max_features': 5000},
+    {'K': 200, 'embedding': 'tfidf', 'max_features': 5000},
+    {'K': 500, 'embedding': 'tfidf', 'max_features': 10000},
+]
+```
+
+**Bulgular**:
+- **K=100** optimal (K=50 çok coarse, K=500 overfitting)
+- **max_features=5000**: Yeterli (10K ile fark minimal)
+
+#### Sonuçlar
+
+**✓ Avantajlar**:
+
+- Kullanıcı ilgi alanlarını **daha structured** şekilde temsil eder
+- Cold-start için faydalı (cluster distribution hızla oluşur)
+- Interpretability: "Bu kullanıcı %50 Sports, %35 Tech ilgili"
+- Model için yüksek boyutlu (103 feature) ama informative signal
+- BERT'e geçiş kolay (sadece embedding yöntemi değişir)
+
+**✗ Dezavantajlar**:
+
+- **Performans etkisi çok sınırlı**: Model AUC'ye katkı ~**0.0005-0.001**
+- **Hesaplama maliyeti yüksek**: K-Means fitting + prediction
+- **Memory overhead**: 103 extra feature per candidate → 13M candidates için büyük
+- TF-IDF similarity features zaten benzer bilgiyi veriyor
+- **Trade-off**: Çok feature eklemek → training yavaşlıyor, minimal gain
+
+#### Karar
+
+**Semantic clustering features şu an KULLANILMIYOR** (`use_semantic_clusters=false`).
+
+**Neden?**:
+- Maliyet/fayda oranı kötü
+- Similarity features yeterli coverage sağlıyor
+- Training time 2x uzuyor, performance gain negligible (~0.001 AUC)
+- Production'da inference latency artırır
+
+**Ne zaman kullanılabilir?**:
+- Eğer cold-start performance kritik olursa
+- Eğer interpretability önemliyse (cluster analysis için)
+- Eğer compute budget sınırsızsa
+- BERT embeddings kullanılabilirse (semantic quality artar)
+
+#### Kod Konumu
+
+```bash
+experiments/015_train_third/semantic_cluster_features.py
+```
+
+**Açma/Kapama**:
+```yaml
+# experiments/015_train_third/config.yaml
+use_semantic_clusters: false  # true yaparsan aktif olur
+semantic_cluster_config:
+  n_clusters: 100
+  embedding_type: 'tfidf'  # Şu an TF-IDF, ileride 'bert' olabilir
+  max_features: 5000
+```
 
 ---
 

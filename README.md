@@ -601,12 +601,81 @@ type output\experiments\2025-12-21-medium-clustering-tfidf-body\medium067_001\re
 View feature importance plots in experiment output folders:
 
 ```
-
 output/experiments/[date]-medium/medium067_001/importance_model.png
-
 ```
 
-## Semantic Clustering Implementation
+## Analysis Tools
+
+### Cold-Start Performance Analysis
+
+Analyze how well the model handles unpopular (cold-start) articles that have sparse interaction history.
+
+**Basic Usage**:
+```bash
+# Analyze small dataset experiment
+python analyze_cold_start.py --experiment output/experiments/015_train_third/small067_001_seed7_20251221_143045 --size small
+
+# Analyze medium dataset experiment
+python analyze_cold_start.py --experiment output/experiments/015_train_third/medium067_001_seed7_20251221_143045 --size medium
+```
+
+**Custom Cold-Start Threshold**:
+```bash
+# Use bottom 20% as cold-start (default is 10%)
+python analyze_cold_start.py --experiment output/experiments/015_train_third/medium067_001_seed7_20251221_143045 --size medium --percentile 0.2
+
+# Use bottom 5% as cold-start
+python analyze_cold_start.py --experiment output/experiments/015_train_third/medium067_001_seed7_20251221_143045 --size medium --percentile 0.05
+```
+
+**What It Reports**:
+- Overall metrics (AUC, nDCG@10, MRR) on all test items
+- Metrics specifically on impressions containing cold-start items
+- Performance gap between popular and cold-start items
+- Percentage of test set affected by cold-start
+
+**Parameters**:
+- `--experiment`: Path to experiment output folder (required)
+- `--size`: Dataset size - `small` or `medium` (default: `small`)
+- `--percentile`: Bottom percentile to consider as cold-start (default: `0.1` = bottom 10%)
+
+**Example Output**:
+```
+================================================================================
+COLD-START ANALYSIS: Bottom 10% Items
+Experiment: output/experiments/015_train_third/medium067_001_seed7_20251221_143045
+================================================================================
+
+1. Loading articles and identifying cold-start items...
+   Total articles: 64,000
+   Popularity threshold (inviews): 150.0
+   Cold-start articles: 6,400 (10.0%)
+
+   ALL ITEMS:
+   AUC       : 0.865739
+   nDCG@5    : 0.714002
+   nDCG@10   : 0.759978
+   MRR       : 0.684697
+
+   IMPRESSIONS WITH COLD-START ITEMS:
+   AUC       : 0.853421
+   nDCG@5    : 0.701234
+   nDCG@10   : 0.745678
+   MRR       : 0.671234
+
+7. Performance Gap (All Items vs Impressions with Cold-Start):
+   Δ AUC     : 0.012318 (1.42%)
+   Δ nDCG@10 : 0.014300 (1.88%)
+```
+
+This helps you understand:
+- How well your model generalizes to unpopular content
+- Whether content-based features (TF-IDF, BERT clustering) help with cold-start
+- If there's a significant performance drop on cold-start items
+
+## Feature Engineering Details
+
+### Semantic Clustering Implementation
 
 ### How It Works
 

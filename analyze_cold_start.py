@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 from sklearn.metrics import roc_auc_score
 import sys
+import json
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from ebrec.evaluation import MetricEvaluator, AucScore, NdcgScore, MrrScore
@@ -31,19 +32,26 @@ def calculate_metrics(labels, predictions):
 
 def analyze_cold_start_performance(
     experiment_path: str,
-    articles_path: str = "input/ebnerd_testset/ebnerd_testset/articles.parquet",
+    size: str = "small",
     cold_start_percentile: float = 0.1,
 ):
     """
     Analyze performance on cold-start items.
     
     Args:
-        experiment_path: Path to experiment output (e.g., 'output/experiments/2025-12-21/small067_001')
-        articles_path: Path to articles.parquet
+        experiment_path: Path to experiment output (e.g., 'output/experiments/015_train_third/small067_001_seed7_...')
+        size: Dataset size - 'small' or 'medium' (default: 'small')
         cold_start_percentile: Bottom percentile to consider as cold-start (default 0.1 = bottom 10%)
     """
     experiment_path = Path(experiment_path)
-    articles_path = Path(articles_path)
+    
+    # Determine articles path based on size
+    if size == "small":
+        articles_path = Path("input/ebnerd_small/articles.parquet")
+    elif size == "medium":
+        articles_path = Path("input/ebnerd_medium/articles.parquet")
+    else:
+        raise ValueError(f"Unknown size: {size}. Use 'small' or 'medium'.")
     
     print("=" * 80)
     print(f"COLD-START ANALYSIS: Bottom {cold_start_percentile*100:.0f}% Items")
@@ -81,80 +89,69 @@ def analyze_cold_start_performance(
     
     # Load original test data to get labels
     print("\n3. Loading test dataset with labels...")
-    # We need to reconstruct the test split
-    size_name = "small"
+    # Load from the test_result to see which impressions were actually predicted
+    result_impression_ids = test_result_df["impression_id"].unique().to_list()
+    
+    # Load behaviors to get impression timestamps
+    print("   Loading behaviors to get timestamps...")
+    if size == "small":
+        behaviors_path = Path("input/ebnerd_small/validation/behaviors.parquet")
+    elif size == "medium":
+        behaviors_path = Path("input/ebnerd_medium/validation/behaviors.parquet")
+    else:
+        raise ValueError(f"Unknown size: {size}")
+    
+    behaviors_df = pl.read_parquet(behaviors_path).select(["impression_id", "impression_time"])
+    
+    # Load full validation dataset
     dataset_path = Path("output/preprocess/dataset067")
-    
-    import random
-    random.seed(42)
-    
     full_validation_df = pl.read_parquet(
-        str(dataset_path / size_name / "validation_dataset.parquet")
+        str(dataset_path / size / "validation_dataset.parquet")
     )
     
-    all_validation_impression_ids = sorted(
-        full_validation_df["impression_id"].unique().to_list()
+    # Join with behaviors to get timestamps
+    full_validation_df = full_validation_df.join(
+        behaviors_df,
+        on="impression_id",
+        how="left"
     )
     
-    # Apply sampling rate if needed (0.1)
-    sampling_rate = 0.1
-    if sampling_rate:
-        all_validation_impression_ids = random.sample(
-            all_validation_impression_ids,
-            int(len(all_validation_impression_ids) * sampling_rate),
-        )
+    # Apply golden rule: Sort by time, use most recent 50% as test set
+    print("   Applying golden rule: sorting by time, taking most recent 50% as test set...")
     
-    split_idx = len(all_validation_impression_ids) // 2
-    test_impression_ids = all_validation_impression_ids[split_idx:]
+    # Get unique impression IDs sorted by time
+    sorted_impressions = (
+        full_validation_df
+        .select(["impression_id", "impression_time"])
+        .unique(subset=["impression_id"], maintain_order=True)
+        .sort("impression_time")
+    )
     
+    total_impressions = len(sorted_impressions)
+    
+    # Take most recent 50% as test set
+    test_split_idx = total_impressions // 2
+    test_impression_ids = sorted_impressions["impression_id"][test_split_idx:].to_list()
+    
+    print(f"   Total unique impressions in validation: {total_impressions}")
+    print(f"   Test set impressions (most recent 50%): {len(test_impression_ids)}")
+    
+    # Filter to test split AND impressions in results
     test_df = full_validation_df.filter(
-        pl.col("impression_id").is_in(test_impression_ids)
+        pl.col("impression_id").is_in(test_impression_ids) &
+        pl.col("impression_id").is_in(result_impression_ids)
     )
     
+    print(f"   Test impressions (from results): {len(result_impression_ids)}")
     print(f"   Test dataset rows: {len(test_df)}")
     
-    # Ensure test_df and test_result_df are aligned
-    print("\n   Aligning test data and results...")
-    test_impression_ids_set = set(test_df["impression_id"].unique().to_list())
-    result_impression_ids_set = set(test_result_df["impression_id"].unique().to_list())
-    
-    # Only keep impressions that exist in both
-    common_impression_ids = list(test_impression_ids_set & result_impression_ids_set)
-    print(f"   Common impressions: {len(common_impression_ids)}")
-    
-    if len(common_impression_ids) == 0:
-        print("ERROR: No common impression IDs between test data and results!")
+    # Data is already aligned since we filtered test_df by result impression IDs
+    if len(test_df) == 0:
+        print("ERROR: No matching impression IDs found in validation dataset!")
         return
     
-    # Filter both to common impressions
-    test_df = test_df.filter(pl.col("impression_id").is_in(common_impression_ids))
-    test_result_df = test_result_df.filter(pl.col("impression_id").is_in(common_impression_ids))
-    
-    print(f"   Aligned test rows: {len(test_df)}")
-    print(f"   Aligned result rows: {len(test_result_df)}")
-    
-    # Calculate metrics on ALL items first
-    print("\n4. Calculating metrics on ALL test items...")
-    all_labels = (
-        test_df.select(["impression_id", "user_id", "label"])
-        .group_by(["impression_id", "user_id"], maintain_order=True)
-        .agg(pl.col("label").cast(pl.Int32))["label"]
-        .to_list()
-    )
-    all_predictions = test_result_df.with_columns(
-        pl.col("rank").list.eval(1 / pl.element())
-    )["rank"].to_list()
-    
-    all_metrics = calculate_metrics(all_labels, all_predictions)
-    
-    print("\n   ALL ITEMS:")
-    print(f"   AUC       : {all_metrics['auc']:.6f}")
-    print(f"   nDCG@5    : {all_metrics['ndcg@5']:.6f}")
-    print(f"   nDCG@10   : {all_metrics['ndcg@10']:.6f}")
-    print(f"   MRR       : {all_metrics['mrr']:.6f}")
-    
     # Filter to impressions that contain at least one cold-start item
-    print(f"\n5. Filtering to impressions with cold-start items...")
+    print(f"\n4. Filtering to impressions with cold-start items...")
     
     # Mark cold-start items in test_df
     test_df = test_df.with_columns(
@@ -191,7 +188,7 @@ def analyze_cold_start_performance(
     print(f"   Total items in these impressions: {num_total_items}")
     
     # Calculate metrics on impressions containing cold-start items
-    print(f"\n6. Calculating metrics on impressions WITH cold-start items...")
+    print(f"\n5. Calculating metrics on impressions WITH cold-start items...")
     cold_labels = (
         cold_test_df.select(["impression_id", "user_id", "label"])
         .group_by(["impression_id", "user_id"], maintain_order=True)
@@ -204,36 +201,72 @@ def analyze_cold_start_performance(
     
     cold_metrics = calculate_metrics(cold_labels, cold_predictions)
     
-    print("\n   IMPRESSIONS WITH COLD-START ITEMS:")
+    print("\n   COLD-START PERFORMANCE:")
     print(f"   AUC       : {cold_metrics['auc']:.6f}")
     print(f"   nDCG@5    : {cold_metrics['ndcg@5']:.6f}")
     print(f"   nDCG@10   : {cold_metrics['ndcg@10']:.6f}")
     print(f"   MRR       : {cold_metrics['mrr']:.6f}")
     
-    # Calculate performance gap
-    print("\n7. Performance Gap (All Items vs Impressions with Cold-Start):")
-    print(f"   Δ AUC     : {all_metrics['auc'] - cold_metrics['auc']:.6f} ({(all_metrics['auc'] - cold_metrics['auc'])/all_metrics['auc']*100:.2f}%)")
-    print(f"   Δ nDCG@10 : {all_metrics['ndcg@10'] - cold_metrics['ndcg@10']:.6f} ({(all_metrics['ndcg@10'] - cold_metrics['ndcg@10'])/all_metrics['ndcg@10']*100:.2f}%)")
+    # Save results to experiment folder in human-readable format
+    output_file = experiment_path / f"cold_start_analysis_p{int(cold_start_percentile*100)}.txt"
     
+    with open(output_file, 'w') as f:
+        f.write("=" * 80 + "\n")
+        f.write("COLD-START ANALYSIS RESULTS\n")
+        f.write("=" * 80 + "\n\n")
+        
+        f.write("CONFIGURATION:\n")
+        f.write(f"  Experiment Path: {experiment_path}\n")
+        f.write(f"  Dataset Size: {size}\n")
+        f.write(f"  Cold-Start Percentile: {cold_start_percentile*100:.0f}% (bottom)\n")
+        f.write(f"  Popularity Threshold (inviews): {popularity_threshold:.1f}\n\n")
+        
+        f.write("DATASET STATISTICS:\n")
+        f.write(f"  Total Articles: {len(articles_df):,}\n")
+        f.write(f"  Cold-Start Articles: {len(cold_start_articles):,} ({len(cold_start_articles)/len(articles_df)*100:.1f}%)\n")
+        f.write(f"  Total Test Impressions: {len(result_impression_ids):,}\n")
+        f.write(f"  Impressions with Cold-Start Items: {len(impressions_with_cold_start):,} ({len(impressions_with_cold_start)/len(result_impression_ids)*100:.1f}%)\n")
+        f.write(f"  Cold-Start Items in These Impressions: {num_cold_items:,} ({num_cold_items/num_total_items*100:.1f}%)\n")
+        f.write(f"  Total Items in These Impressions: {num_total_items:,}\n\n")
+        
+        f.write("COLD-START PERFORMANCE METRICS:\n")
+        f.write(f"  AUC       : {cold_metrics['auc']:.6f}\n")
+        f.write(f"  nDCG@5    : {cold_metrics['ndcg@5']:.6f}\n")
+        f.write(f"  nDCG@10   : {cold_metrics['ndcg@10']:.6f}\n")
+        f.write(f"  MRR       : {cold_metrics['mrr']:.6f}\n\n")
+        
+        f.write("=" * 80 + "\n")
+    
+    print(f"\n✓ Results saved to: {output_file}")
     print("\n" + "=" * 80)
     
     return {
-        "all": all_metrics,
-        "cold_start": cold_metrics,
-        "cold_start_impressions_ratio": len(impressions_with_cold_start) / len(test_impression_ids),
-        "cold_start_items_ratio": num_cold_items / num_total_items,
+        "cold_start_percentile": cold_start_percentile,
+        "popularity_threshold": float(popularity_threshold),
+        "cold_start_articles_count": len(cold_start_articles),
+        "cold_start_impressions_count": len(impressions_with_cold_start),
+        "metrics": cold_metrics,
     }
 
 
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Analyze cold-start performance")
+    parser = argparse.ArgumentParser(
+        description="Analyze cold-start performance for news recommendation experiments"
+    )
     parser.add_argument(
         "--experiment",
         type=str,
         required=True,
-        help="Path to experiment output (e.g., output/experiments/2025-12-21/small067_001)",
+        help="Path to experiment output (e.g., output/experiments/015_train_third/medium067_001_seed7_20251221_143045)",
+    )
+    parser.add_argument(
+        "--size",
+        type=str,
+        default="small",
+        choices=["small", "medium"],
+        help="Dataset size (default: small)",
     )
     parser.add_argument(
         "--percentile",
@@ -246,5 +279,6 @@ if __name__ == "__main__":
     
     analyze_cold_start_performance(
         experiment_path=args.experiment,
+        size=args.size,
         cold_start_percentile=args.percentile,
     )
