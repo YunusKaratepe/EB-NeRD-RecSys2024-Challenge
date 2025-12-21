@@ -1,4 +1,4 @@
-input_dir: D:/ITU/phd/data-mining/project/EB-NeRD/dataset
+input_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/input
 output_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output
 exp_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output/experiments
 features_dir: D:/ITU/phd/data-mining/project/EB-NeRD/recsys-challenge-2024-1st-place-master/kami/output/features

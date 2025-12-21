@@ -1,7 +1,7 @@
 import polars as pl
 from pathlib import Path
 
-dataset_path = Path("D:/ITU/phd/data-mining/project/EB-NeRD/dataset/ebnerd_large")
+dataset_path = Path("input/ebnerd_large")
 
 print("Checking date ranges...\n")
 

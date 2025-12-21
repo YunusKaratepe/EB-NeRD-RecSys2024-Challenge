@@ -194,14 +194,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--source",
         type=str,
-        default="../../../dataset/ebnerd_large",
-        help="Source raw dataset path (default: ../../../dataset/ebnerd_large)",
+        default="input/ebnerd_large",
+        help="Source raw dataset path (default: input/ebnerd_large)",
     )
     parser.add_argument(
         "--target",
         type=str,
-        default="../../../dataset/ebnerd_medium",
-        help="Target dataset path (default: ../../../dataset/ebnerd_medium)",
+        default="input/ebnerd_medium",
+        help="Target dataset path (default: input/ebnerd_medium)",
     )
     parser.add_argument(
         "--ratio",

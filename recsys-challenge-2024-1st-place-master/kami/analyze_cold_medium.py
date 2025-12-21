@@ -15,20 +15,11 @@ def analyze_experiment(exp_path: str, size_name: str = "medium"):
     """Analyze cold-start performance for an experiment."""
     exp_path = Path(exp_path)
     
-    # Load articles - check multiple possible locations
-    possible_paths = [
-        Path(f"input/ebnerd_{size_name}/articles.parquet"),
-        Path(f"../../dataset/ebnerd_{size_name}/articles.parquet"),
-    ]
+    # Load articles from input folder
+    articles_path = Path(f"input/ebnerd_{size_name}/articles.parquet")
     
-    articles_path = None
-    for path in possible_paths:
-        if path.exists():
-            articles_path = path
-            break
-    
-    if articles_path is None:
-        print(f"ERROR: Could not find articles.parquet for {size_name} dataset")
+    if not articles_path.exists():
+        print(f"ERROR: Could not find articles.parquet at {articles_path}")
         return
     
     articles_df = pl.read_parquet(articles_path)
