@@ -17,7 +17,7 @@ graph_workers: 4
 
 # Semantic clustering feature extraction settings (BERT-based)
 use_semantic_clusters: true  # Enable semantic cluster features
-semantic_n_clusters: 15  # Number of semantic clusters (K)
+semantic_n_clusters: 30  # Number of semantic clusters (K)
 semantic_text_column: title  # Which text to use: title, body, or subtitle
 
 lgbm:
