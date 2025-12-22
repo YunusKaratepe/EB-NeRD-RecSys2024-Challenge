@@ -176,13 +176,17 @@ This will run the experiment 3 times with seeds 7, 42, and 123. Each run will be
 - `output/experiments/015_train_third/medium067_001_seed42_20251221_150122/`
 - `output/experiments/015_train_third/medium067_001_seed123_20251221_153018/`
 
-## Dataset Statistics
+## Dataset
 
 | Dataset | Train Impressions | Validation Impressions | Articles | Users (train) | Users (val) |
 | ------- | ----------------- | ---------------------- | -------- | ------------- | ----------- |
 | Small   | ~260K             | ~270K                  | 125K     | ~69K          | ~77K        |
 | Medium  | ~1.2M             | ~1.25M                 | 64K      | 342K          | 384K        |
 | Large   | ~12M              | ~12.5M                 | 125K     | ~3.4M         | ~3.8M       |
+
+* You can download the dataset from this drive link: https://drive.google.com/drive/folders/1G1iLHNx2enkdYMeTusaGgt8_rv8fSzFi?usp=sharing
+
+* After you download the files, unzip them into the `input` folder in the project workspace.
 
 ## Recommended Workflow for Research
 
@@ -203,6 +207,8 @@ This will run the experiment 3 times with seeds 7, 42, and 123. Each run will be
 * `create_medium_dataset.py` file is used to create medium dataset. Since you are given this dataset you don't have to run this.
 
 * Medium dataset that is provided is created to include 10% of the Large dataset.
+
+* You can run `create_medium_dataset.py` with different `sample_ratio` 
 
 ## Citation & References
 
