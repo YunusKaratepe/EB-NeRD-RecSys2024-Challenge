@@ -1,0 +1,7 @@
+Demo için ortam kurulumlarından sonra aşağıdaki kodları çalıştırabilirsiniz:
+
+python analyze_cold_start.py --experiment output/experiments/2025-12-21-medium-clustering-tfidf-body --size medium --percentile 0.1
+python analyze_cold_start.py --experiment output/experiments/2025-12-21-medium-clustering-tfidf-body --size medium --percentile 0.3
+
+python analyze_cold_start.py --experiment output/experiments/2025-12-21-small/small067_001 --size medium --percentile 0.1
+python analyze_cold_start.py --experiment output/experiments/2025-12-21-small/small067_001 --size medium --percentile 0.3
