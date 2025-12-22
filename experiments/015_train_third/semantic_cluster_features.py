@@ -1,19 +1,18 @@
 """
 BERT-Based Semantic Clustering Feature Extraction
 
-Simplified version using TF-IDF + K-Means for semantic clustering.
-For production, replace TF-IDF with actual BERT embeddings.
+Uses pre-computed BERT embeddings from google_bert_base_multilingual_cased
+for semantic clustering with K-Means.
 """
 
 import gc
 import pickle
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import polars as pl
 from sklearn.cluster import MiniBatchKMeans
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 from tqdm.auto import tqdm
 
@@ -22,78 +21,76 @@ class SemanticClusterFeatureExtractor:
     """
     Extract semantic cluster-based features for news recommendation.
     
+    Uses pre-computed BERT embeddings for better semantic understanding.
+    
     Implements the methodology from Section 4.4.2 of the research report:
-    1. Global Clustering: Create K semantic clusters from all articles
+    1. Global Clustering: Create K semantic clusters from all articles using BERT
     2. User Profiling: Calculate user's interest distribution across clusters
     """
     
     def __init__(
         self,
         n_clusters: int = 50,
-        max_features: int = 5000,
         random_state: int = 42,
+        bert_embeddings_path: Optional[str] = None,
     ):
         """
         Initialize Semantic Cluster Feature Extractor.
         
         Args:
             n_clusters: Number of semantic clusters (K)
-            max_features: Maximum TF-IDF vocabulary size
             random_state: Random seed for reproducibility
+            bert_embeddings_path: Path to pre-computed BERT embeddings parquet file
         """
         self.n_clusters = n_clusters
-        self.max_features = max_features
         self.random_state = random_state
+        self.bert_embeddings_path = bert_embeddings_path or "input/google_bert_base_multilingual_cased/bert_base_multilingual_cased.parquet"
         
-        self.vectorizer = None
         self.kmeans = None
         self.article_clusters = {}  # article_id -> cluster_id
         self.cluster_centers = None
+        self.bert_embeddings_df = None  # Cache BERT embeddings
     
     def fit(
         self,
         articles_df: pl.DataFrame,
-        text_column: str = "title",
+        text_column: str = "title",  # Not used anymore, kept for API compatibility
     ) -> 'SemanticClusterFeatureExtractor':
         """
-        Fit global semantic clusters on all articles.
+        Fit global semantic clusters on all articles using pre-computed BERT embeddings.
         
         Args:
-            articles_df: DataFrame with article texts
-            text_column: Column containing text (title, body, or concatenation)
+            articles_df: DataFrame with article IDs
+            text_column: Ignored (kept for compatibility)
         
         Returns:
             self
         """
-        print(f"Fitting semantic clusters on {len(articles_df)} articles...")
+        print(f"Fitting semantic clusters on {len(articles_df)} articles using BERT embeddings...")
         
-        # Extract texts
-        texts = articles_df[text_column].fill_null("").to_list()
-        article_ids = articles_df["article_id"].to_list()
+        # Load pre-computed BERT embeddings
+        print(f"Loading BERT embeddings from {self.bert_embeddings_path}...")
+        bert_df = pl.read_parquet(self.bert_embeddings_path)
+        self.bert_embeddings_df = bert_df  # Cache for later use
         
-        # Create TF-IDF representations
-        print("Creating TF-IDF representations...")
-        # Danish stopwords for proper text processing
-        danish_stopwords = [
-            'og', 'i', 'det', 'at', 'en', 'til', 'er', 'som', 'på', 'de',
-            'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig', 'sig',
-            'den', 'har', 'ham', 'hun', 'nu', 'over', 'da', 'fra', 'du',
-            'ud', 'sin', 'dem', 'os', 'op', 'man', 'hans', 'hvor', 'eller',
-            'hvad', 'skal', 'selv', 'her', 'alle', 'vil', 'blev', 'kunne',
-            'ind', 'når', 'være', 'dog', 'noget', 'ville', 'jo', 'deres',
-            'efter', 'ned', 'skulle', 'denne', 'end', 'dette', 'mit', 'også',
-            'under', 'have', 'dig', 'anden', 'hende', 'mine', 'alt', 'meget',
-            'sit', 'sine', 'vor', 'mod', 'disse', 'hvis', 'din', 'nogle',
-            'hos', 'blive', 'mange', 'ad', 'bliver', 'hendes', 'været',
-            'thi', 'jer', 'sådan'
-        ]
-        self.vectorizer = TfidfVectorizer(
-            max_features=self.max_features,
-            stop_words=danish_stopwords,  # Danish stopwords for news articles
-            ngram_range=(1, 2),
-            min_df=2,
-        )
-        article_vectors = self.vectorizer.fit_transform(texts)
+        print(f"Loaded BERT embeddings for {len(bert_df)} articles")
+        
+        # Extract article IDs and embeddings
+        article_ids = bert_df["article_id"].to_list()
+        
+        # BERT embeddings are stored as list/array in a single column
+        # Column name is 'google-bert/bert-base-multilingual-cased'
+        embedding_col = 'google-bert/bert-base-multilingual-cased'
+        
+        if embedding_col not in bert_df.columns:
+            raise ValueError(f"Expected embedding column '{embedding_col}' not found. Available columns: {bert_df.columns}")
+        
+        # Convert embeddings to numpy array
+        embeddings_list = bert_df[embedding_col].to_list()
+        article_vectors = np.array(embeddings_list, dtype=np.float32)
+        
+        print(f"Article vectors shape: {article_vectors.shape}")
+        print(f"Embedding dimension: {article_vectors.shape[1]}")
         
         # Normalize for better clustering
         article_vectors = normalize(article_vectors, norm='l2')
@@ -240,15 +237,20 @@ class SemanticClusterFeatureExtractor:
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
         
-        # Save all components
-        with open(save_path / "vectorizer.pkl", "wb") as f:
-            pickle.dump(self.vectorizer, f)
-        
+        # Save kmeans and article clusters (no vectorizer for BERT-based approach)
         with open(save_path / "kmeans.pkl", "wb") as f:
             pickle.dump(self.kmeans, f)
         
         with open(save_path / "article_clusters.pkl", "wb") as f:
             pickle.dump(self.article_clusters, f)
+        
+        # Save config
+        config = {
+            'n_clusters': self.n_clusters,
+            'bert_embeddings_path': self.bert_embeddings_path,
+        }
+        with open(save_path / "config.pkl", "wb") as f:
+            pickle.dump(config, f)
         
         print(f"Model saved to {save_path}")
     
@@ -256,16 +258,20 @@ class SemanticClusterFeatureExtractor:
         """Load a trained clustering model."""
         load_path = Path(load_path)
         
-        with open(load_path / "vectorizer.pkl", "rb") as f:
-            self.vectorizer = pickle.load(f)
+        # Load config
+        with open(load_path / "config.pkl", "rb") as f:
+            config = pickle.load(f)
+        self.n_clusters = config['n_clusters']
+        self.bert_embeddings_path = config['bert_embeddings_path']
         
+        # Load kmeans
         with open(load_path / "kmeans.pkl", "rb") as f:
             self.kmeans = pickle.load(f)
         
+        # Load article clusters
         with open(load_path / "article_clusters.pkl", "rb") as f:
             self.article_clusters = pickle.load(f)
         
-        self.n_clusters = self.kmeans.n_clusters
         self.cluster_centers = self.kmeans.cluster_centers_
         
         print(f"Model loaded from {load_path}")

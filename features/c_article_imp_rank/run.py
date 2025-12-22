@@ -75,7 +75,9 @@ def process_df(cfg, candidate_df, articles_df):
 def create_feature(cfg: DictConfig, output_path):
     size_name = cfg.exp.size_name
 
-    articles_path = Path("input/ebnerd_testset/ebnerd_testset") / "articles.parquet"
+    # Use dataset-specific articles file instead of testset
+    size_name = cfg.exp.size_name
+    articles_path = Path(cfg.dir.input_dir) / f"ebnerd_{size_name}" / "articles.parquet"
     articles_df = pl.read_parquet(articles_path)
     for data_name in ["train", "validation", "test"]:
         print(f"processing {data_name} data")

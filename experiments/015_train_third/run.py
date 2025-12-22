@@ -427,15 +427,14 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                     else:
                         articles_df = pl.read_parquet(articles_path)
                         
-                        # Initialize and train semantic extractor
+                        # Initialize and train semantic extractor using BERT embeddings
                         semantic_extractor = SemanticClusterFeatureExtractor(
                             n_clusters=cfg.exp.get("semantic_n_clusters", 30),
-                            max_features=5000,
+                            random_state=cfg.exp.seed,
                         )
                         
-                        # Train on article texts
-                        text_column = cfg.exp.get("semantic_text_column", "title")
-                        semantic_extractor.fit(articles_df, text_column=text_column)
+                        # Train on articles (BERT embeddings loaded automatically)
+                        semantic_extractor.fit(articles_df)
                         
                         # Save model
                         semantic_extractor.save_model(semantic_model_path)

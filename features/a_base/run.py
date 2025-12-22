@@ -50,7 +50,9 @@ def process_df(cfg, df):
 
 
 def create_feature(cfg: DictConfig, output_path):
-    articles_path = Path("input/ebnerd_testset/ebnerd_testset") / "articles.parquet"
+    # Use dataset-specific articles file instead of testset
+    size_name = cfg.exp.size_name
+    articles_path = Path(cfg.dir.input_dir) / f"ebnerd_{size_name}" / "articles.parquet"
     articles_df = pl.read_parquet(articles_path)
     df = process_df(cfg, articles_df).select(KEY_COLUMNS + USE_COLUMNS)
     df = df.rename({col: f"{PREFIX}_{col}" for col in USE_COLUMNS})
