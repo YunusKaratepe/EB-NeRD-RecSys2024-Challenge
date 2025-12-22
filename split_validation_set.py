@@ -1,5 +1,5 @@
 """
-Split validation set into val/test using the golden rule:
+Split validation set into val/test:
 - Sort by impression_time
 - First 50% → validation set
 - Last 50% (most recent) → test set

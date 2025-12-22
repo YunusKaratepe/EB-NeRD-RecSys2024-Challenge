@@ -43,7 +43,12 @@ def process_df(cfg, articles_df, history_df, candidate_df):
     user_text_list = user_df["ner_clusters"].list.join(separator=" ").to_list()
 
     print("TfidfVectorizer")
-    vectorizer = TfidfVectorizer()
+    # For NER clusters, stopwords are less relevant but included for consistency
+    danish_stopwords = [
+        'og', 'i', 'det', 'at', 'en', 'til', 'er', 'som', 'på', 'de',
+        'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig', 'sig'
+    ]
+    vectorizer = TfidfVectorizer(stop_words=danish_stopwords)
     article_matrix = vectorizer.fit_transform(article_text_list)
     user_matrix = vectorizer.transform(user_text_list)
 

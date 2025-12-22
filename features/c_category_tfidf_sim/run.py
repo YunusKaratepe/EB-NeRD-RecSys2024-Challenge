@@ -38,7 +38,12 @@ def process_df(cfg, articles_df, history_df, candidate_df):
     article_text_list = articles_df["category"].cast(pl.String).to_list()
     user_text_list = user_df["category"].list.join(separator=" ").to_list()
 
-    vectorizer = TfidfVectorizer()
+    # For category/subcategory, stopwords less critical but included for consistency
+    danish_stopwords = [
+        'og', 'i', 'det', 'at', 'en', 'til', 'er', 'som', 'på', 'de',
+        'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig', 'sig'
+    ]
+    vectorizer = TfidfVectorizer(stop_words=danish_stopwords)
     article_matrix = vectorizer.fit_transform(article_text_list)
     user_matrix = vectorizer.transform(user_text_list)
 

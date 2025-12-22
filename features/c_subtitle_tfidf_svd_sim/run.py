@@ -54,13 +54,23 @@ def process_df(cfg, article_embeddings, articles_df, history_df, candidate_df):
     for new_article_id_list in tqdm(map_history_df["new_article_id"].to_list()):
         user_embeddings.append(article_embeddings[new_article_id_list].mean(axis=0))
     user_embeddings = normalize(np.array(user_embeddings), norm="l2")
+    
+    # Create mean embedding for users with no history (cold-start)
+    mean_embedding = user_embeddings.mean(axis=0)
 
+    # Map article and user IDs to indices
+    # For users not in history, use -1 as special index
     candidate_df = candidate_df.with_columns(
         [
             pl.col("article_id").replace(article_id_map).alias("article_rn"),
-            pl.col("user_id").replace(user_id_map).alias("user_rn"),
+            pl.col("user_id").replace(user_id_map, default=-1).alias("user_rn"),
         ]
     )
+    
+    # Check for users without history
+    users_without_history = (candidate_df["user_rn"] == -1).sum()
+    if users_without_history > 0:
+        print(f"Warning: {users_without_history} candidates have users without history (will use mean embedding)")
 
     # 要素積の合計を類似度とする（consin similarity）
     print(f"{article_embeddings.shape=}, {user_embeddings.shape=}")
@@ -74,15 +84,24 @@ def process_df(cfg, article_embeddings, articles_df, history_df, candidate_df):
         end_idx = min(start_idx + chunk_size, total_rows)
         chunk_df = candidate_df[start_idx:end_idx]
         
+        chunk_article_rn = chunk_df["article_rn"].to_list()
+        chunk_user_rn = chunk_df["user_rn"].to_list()
+        
+        # Handle users without history by using mean embedding
+        chunk_user_embeddings = np.array([
+            user_embeddings[idx] if idx >= 0 else mean_embedding
+            for idx in chunk_user_rn
+        ])
+        
         chunk_similarity = np.asarray(
             (
-                article_embeddings[chunk_df["article_rn"].to_list()]
-                * user_embeddings[chunk_df["user_rn"].to_list()]
+                article_embeddings[chunk_article_rn]
+                * chunk_user_embeddings
             ).sum(axis=1)
         ).flatten()
         
         similarity_chunks.append(chunk_similarity)
-        del chunk_similarity
+        del chunk_similarity, chunk_article_rn, chunk_user_rn, chunk_user_embeddings
         gc.collect()
     
     similarity = np.concatenate(similarity_chunks)
@@ -114,7 +133,21 @@ def create_feature(cfg: DictConfig, output_path):
     articles_df = pl.read_parquet(articles_path)
 
     print("make article embeddings")
-    vectorizer = TfidfVectorizer()
+    # Danish stopwords for proper text processing
+    danish_stopwords = [
+        'og', 'i', 'det', 'at', 'en', 'til', 'er', 'som', 'på', 'de',
+        'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig', 'sig',
+        'den', 'har', 'ham', 'hun', 'nu', 'over', 'da', 'fra', 'du',
+        'ud', 'sin', 'dem', 'os', 'op', 'man', 'hans', 'hvor', 'eller',
+        'hvad', 'skal', 'selv', 'her', 'alle', 'vil', 'blev', 'kunne',
+        'ind', 'når', 'være', 'dog', 'noget', 'ville', 'jo', 'deres',
+        'efter', 'ned', 'skulle', 'denne', 'end', 'dette', 'mit', 'også',
+        'under', 'have', 'dig', 'anden', 'hende', 'mine', 'alt', 'meget',
+        'sit', 'sine', 'vor', 'mod', 'disse', 'hvis', 'din', 'nogle',
+        'hos', 'blive', 'mange', 'ad', 'bliver', 'hendes', 'været',
+        'thi', 'jer', 'sådan'
+    ]
+    vectorizer = TfidfVectorizer(stop_words=danish_stopwords, min_df=2, max_df=0.8)
     article_matrix = vectorizer.fit_transform(articles_df[TARGET_COL].to_list())
     decomposer = TruncatedSVD(n_components=n_components)
     article_embeddings = normalize(decomposer.fit_transform(article_matrix), norm="l2")

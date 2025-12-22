@@ -73,9 +73,23 @@ class SemanticClusterFeatureExtractor:
         
         # Create TF-IDF representations
         print("Creating TF-IDF representations...")
+        # Danish stopwords for proper text processing
+        danish_stopwords = [
+            'og', 'i', 'det', 'at', 'en', 'til', 'er', 'som', 'på', 'de',
+            'med', 'han', 'af', 'for', 'ikke', 'der', 'var', 'mig', 'sig',
+            'den', 'har', 'ham', 'hun', 'nu', 'over', 'da', 'fra', 'du',
+            'ud', 'sin', 'dem', 'os', 'op', 'man', 'hans', 'hvor', 'eller',
+            'hvad', 'skal', 'selv', 'her', 'alle', 'vil', 'blev', 'kunne',
+            'ind', 'når', 'være', 'dog', 'noget', 'ville', 'jo', 'deres',
+            'efter', 'ned', 'skulle', 'denne', 'end', 'dette', 'mit', 'også',
+            'under', 'have', 'dig', 'anden', 'hende', 'mine', 'alt', 'meget',
+            'sit', 'sine', 'vor', 'mod', 'disse', 'hvis', 'din', 'nogle',
+            'hos', 'blive', 'mange', 'ad', 'bliver', 'hendes', 'været',
+            'thi', 'jer', 'sådan'
+        ]
         self.vectorizer = TfidfVectorizer(
             max_features=self.max_features,
-            stop_words='english',  # For multilingual, consider different stopwords
+            stop_words=danish_stopwords,  # Danish stopwords for news articles
             ngram_range=(1, 2),
             min_df=2,
         )
