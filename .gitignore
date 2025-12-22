@@ -6,3 +6,5 @@ ebnerd_small/
 input/
 output/
 .conda
+medium_test/
+medium_val/

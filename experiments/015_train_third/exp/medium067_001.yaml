@@ -21,13 +21,13 @@ semantic_n_clusters: 30  # Number of semantic clusters (K)
 semantic_text_column: title  # Which text to use: title, body, or subtitle
 
 lgbm:
-  num_boost_round: 1200  # Increased from 800 - more iterations for slower learning
-  early_stopping_round: 100  # Increased from 80 - even more patient
+  num_boost_round: 800  # Increased from 800 - more iterations for slower learning
+  early_stopping_round: 80  # Increased from 80 - even more patient
   verbose_eval: 10
   params:
-    learning_rate: 0.03  # Decreased from 0.05 - slower, more careful learning
-    max_depth: 10  # Increased from 8 - deeper trees for more complex patterns
-    lambda_l2: 0.5  # Increased from 0.1 - stronger regularization to prevent overfitting
+    learning_rate: 0.05  # Decreased from 0.05 - slower, more careful learning
+    max_depth: 12  # Increased from 8 - deeper trees for more complex patterns
+    lambda_l2: 0.3  # Increased from 0.1 - stronger regularization to prevent overfitting
     feature_fraction: 0.7  # Decreased from 0.8 - use fewer features per tree
     num_leaves: 256  # Increased from 128 - more leaf nodes for better expressiveness
   unuse_cols: 
