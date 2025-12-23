@@ -133,7 +133,12 @@ class GraphFeatureExtractor:
         print(f"Parameters: dim={self.embedding_dim}, walk_length={self.walk_length}, "
               f"num_walks={self.num_walks}, p={self.p}, q={self.q}")
         
-        # Initialize Node2Vec
+        # Initialize Node2Vec - use workers=1 on Windows to avoid multiprocessing issues
+        import platform
+        workers = 1 if platform.system() == "Windows" else self.workers
+        if platform.system() == "Windows" and self.workers > 1:
+            print(f"WARNING: Using workers=1 on Windows (requested {self.workers}) to avoid multiprocessing hang")
+        
         node2vec = Node2Vec(
             self.graph,
             dimensions=self.embedding_dim,
@@ -141,7 +146,7 @@ class GraphFeatureExtractor:
             num_walks=self.num_walks,
             p=self.p,
             q=self.q,
-            workers=self.workers,
+            workers=workers,
         )
         
         # Train Word2Vec model

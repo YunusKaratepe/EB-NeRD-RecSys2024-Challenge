@@ -414,7 +414,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 if (semantic_model_path / "article_clusters.pkl").exists():
                     logger.info("Loading pre-trained semantic cluster model...")
                     semantic_extractor = SemanticClusterFeatureExtractor(
-                        n_clusters=cfg.exp.get("semantic_n_clusters", 30)
+                        n_clusters=cfg.exp.get("semantic_n_clusters", 30),
+                        mode=cfg.exp.get("semantic_clusters_from", "bert")
                     )
                     semantic_extractor.load_model(semantic_model_path)
                 else:
@@ -427,14 +428,18 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                     else:
                         articles_df = pl.read_parquet(articles_path)
                         
-                        # Initialize and train semantic extractor using BERT embeddings
+                        # Initialize and train semantic extractor
+                        clusters_from = cfg.exp.get("semantic_clusters_from", "bert")
+                        logger.info(f"Using {clusters_from.upper()} mode for semantic clustering")
                         semantic_extractor = SemanticClusterFeatureExtractor(
                             n_clusters=cfg.exp.get("semantic_n_clusters", 30),
                             random_state=cfg.exp.seed,
+                            mode=clusters_from,
                         )
                         
-                        # Train on articles (BERT embeddings loaded automatically)
-                        semantic_extractor.fit(articles_df)
+                        # Train on articles
+                        text_column = cfg.exp.get("semantic_text_column", "title")
+                        semantic_extractor.fit(articles_df, text_column=text_column)
                         
                         # Save model
                         semantic_extractor.save_model(semantic_model_path)
@@ -549,7 +554,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 
                 logger.info("Loading semantic cluster model for prediction...")
                 semantic_extractor = SemanticClusterFeatureExtractor(
-                    n_clusters=cfg.exp.get("semantic_n_clusters", 30)
+                    n_clusters=cfg.exp.get("semantic_n_clusters", 30),
+                    mode=cfg.exp.get("semantic_clusters_from", "bert")
                 )
                 semantic_extractor.load_model(semantic_model_path)
                 
@@ -650,7 +656,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 
                 logger.info("Loading semantic cluster model for eval...")
                 semantic_extractor = SemanticClusterFeatureExtractor(
-                    n_clusters=cfg.exp.get("semantic_n_clusters", 30)
+                    n_clusters=cfg.exp.get("semantic_n_clusters", 30),
+                    mode=cfg.exp.get("semantic_clusters_from", "bert")
                 )
                 semantic_extractor.load_model(semantic_model_path)
                 

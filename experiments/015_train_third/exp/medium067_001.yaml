@@ -3,22 +3,23 @@ defaults:
 
 seed: 7  # Can override with exp.seed=42 on command line
 sampling_rate: 0.1
-size_name: medium
+size_name: small
 dataset_path: output/preprocess/dataset067
 use_auc: false
 
 # Graph-based feature extraction settings
 use_graph_features: false  # Graph features degrade performance significantly - keep disabled
 graph_include_embeddings: false  # Set to true to add all 128 embedding dimensions
-graph_embedding_dim: 64
-graph_walk_length: 30
-graph_num_walks: 200
-graph_workers: 4
+graph_embedding_dim: 16
+graph_walk_length: 20
+graph_num_walks: 80
+graph_workers: 1 # Uses 1 on windows (Bug)
 
-# Semantic clustering feature extraction settings (BERT-based)
+# Semantic clustering feature extraction settings
 use_semantic_clusters: true  # Enable semantic cluster features
+semantic_clusters_from: bert  # "bert" to use pre-computed BERT embeddings, "tfidf" to compute TF-IDF vectors
 semantic_n_clusters: 30  # Number of semantic clusters (K)
-semantic_text_column: title  # Which text to use: title, body, or subtitle
+semantic_text_column: title  # Which text to use: title, body, or subtitle (for TF-IDF mode)
 
 lgbm:
   num_boost_round: 800  # Increased from 800 - more iterations for slower learning
