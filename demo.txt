@@ -8,3 +8,5 @@ python analyze_cold_start.py --experiment output/experiments/2025-12-21-small/sm
 python analyze_cold_start.py --experiment output/experiments/2025-12-21-small-clustering-tfidf-body/small067_001 --size small --percentile 1
 python analyze_cold_start.py --experiment output/experiments/2025-12-21-small-clustering-tfidf-title/small067_001 --size small --percentile 1
 
+python analyze_cold_start.py --experiment output/experiments/015_train_third/medium067_001_seed7_20251223_080813 --size small --percentile 0.3
+
