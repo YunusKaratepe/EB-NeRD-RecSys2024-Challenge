@@ -1,0 +1,4 @@
+Currently in this phase -->
+run.bat train --exp=small067_001
+---
+run.bat train --exp=medium067_001

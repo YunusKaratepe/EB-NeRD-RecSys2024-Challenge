@@ -415,7 +415,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                     logger.info("Loading pre-trained semantic cluster model...")
                     semantic_extractor = SemanticClusterFeatureExtractor(
                         n_clusters=cfg.exp.get("semantic_n_clusters", 30),
-                        mode=cfg.exp.get("semantic_clusters_from", "bert")
+                        mode=cfg.exp.get("semantic_clusters_from", "bert"),
+                        use_weighted_cluster_features=cfg.exp.get("use_weighted_cluster_features", False),
                     )
                     semantic_extractor.load_model(semantic_model_path)
                 else:
@@ -435,6 +436,7 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                             n_clusters=cfg.exp.get("semantic_n_clusters", 30),
                             random_state=cfg.exp.seed,
                             mode=clusters_from,
+                            use_weighted_cluster_features=cfg.exp.get("use_weighted_cluster_features", False),
                         )
                         
                         # Train on articles
@@ -555,7 +557,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 logger.info("Loading semantic cluster model for prediction...")
                 semantic_extractor = SemanticClusterFeatureExtractor(
                     n_clusters=cfg.exp.get("semantic_n_clusters", 30),
-                    mode=cfg.exp.get("semantic_clusters_from", "bert")
+                    mode=cfg.exp.get("semantic_clusters_from", "bert"),
+                    use_weighted_cluster_features=cfg.exp.get("use_weighted_cluster_features", False),
                 )
                 semantic_extractor.load_model(semantic_model_path)
                 
@@ -657,7 +660,8 @@ def main_stage(cfg: DictConfig, output_path) -> None:
                 logger.info("Loading semantic cluster model for eval...")
                 semantic_extractor = SemanticClusterFeatureExtractor(
                     n_clusters=cfg.exp.get("semantic_n_clusters", 30),
-                    mode=cfg.exp.get("semantic_clusters_from", "bert")
+                    mode=cfg.exp.get("semantic_clusters_from", "bert"),
+                    use_weighted_cluster_features=cfg.exp.get("use_weighted_cluster_features", False),
                 )
                 semantic_extractor.load_model(semantic_model_path)
                 
