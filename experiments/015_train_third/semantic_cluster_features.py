@@ -43,6 +43,7 @@ class SemanticClusterFeatureExtractor:
         mode: str = "bert",  # "bert" or "tfidf"
         bert_embeddings_path: Optional[str] = None,
         max_tfidf_features: int = 5000,
+        use_weighted_cluster_features: bool = False,
     ):
         """
         Initialize Semantic Cluster Feature Extractor.
@@ -68,6 +69,7 @@ class SemanticClusterFeatureExtractor:
         self.tfidf_vectorizer = None  # For TF-IDF mode
         self.embedding_dim = 768 if mode == "bert" else max_tfidf_features
         self.user_profile_embeddings_cache = {}  # Cache user profiles to avoid recomputation
+        self.use_weighted_cluster_features = use_weighted_cluster_features
     
     def fit(
         self,
@@ -206,12 +208,26 @@ class SemanticClusterFeatureExtractor:
             # No history: uniform distribution
             return np.ones(self.n_clusters) / self.n_clusters
         
-        # Count clicks per cluster
+        # Count clicks per cluster (optionally weighted by article distance to cluster center)
         cluster_counts = np.zeros(self.n_clusters)
         for article_id in user_history:
             cluster_id = self.article_clusters.get(article_id, -1)
             if cluster_id >= 0:
-                cluster_counts[cluster_id] += 1
+                weight = 1.0
+                if self.use_weighted_cluster_features:
+                    # if we have the article embedding and cluster center, weight by distance
+                    if article_id in self.article_embeddings_cache and self.cluster_centers is not None:
+                        try:
+                            article_embed = self.article_embeddings_cache[article_id]
+                            cluster_center = self.cluster_centers[cluster_id]
+                            dist = np.linalg.norm(article_embed - cluster_center)
+                            # weight decreases with distance; use exp(-dist)
+                            weight = float(np.exp(-dist))
+                        except Exception:
+                            weight = 1.0
+                    else:
+                        weight = 1.0
+                cluster_counts[cluster_id] += weight
         
         # Normalize to distribution
         total = cluster_counts.sum()
@@ -442,6 +458,7 @@ class SemanticClusterFeatureExtractor:
             'bert_embeddings_path': self.bert_embeddings_path,
             'max_tfidf_features': self.max_tfidf_features,
             'embedding_dim': self.embedding_dim,
+            'use_weighted_cluster_features': self.use_weighted_cluster_features,
         }
         with open(save_path / "config.pkl", "wb") as f:
             pickle.dump(config, f)
@@ -460,6 +477,7 @@ class SemanticClusterFeatureExtractor:
         self.bert_embeddings_path = config.get('bert_embeddings_path', self.bert_embeddings_path)
         self.max_tfidf_features = config.get('max_tfidf_features', 5000)
         self.embedding_dim = config.get('embedding_dim', 768)
+        self.use_weighted_cluster_features = config.get('use_weighted_cluster_features', False)
         
         # Load kmeans, article clusters, and embeddings cache
         with open(load_path / "kmeans.pkl", "rb") as f:
