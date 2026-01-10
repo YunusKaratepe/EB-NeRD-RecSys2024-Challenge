@@ -3,7 +3,7 @@ defaults:
 
 seed: 7  # Can override with exp.seed=42 on command line
 sampling_rate: 0.1
-size_name: small
+size_name: medium
 dataset_path: output/preprocess/dataset067
 use_auc: false
 
@@ -19,7 +19,8 @@ graph_workers: 1 # Uses 1 on windows (Bug)
 use_semantic_clusters: true  # Enable semantic cluster features
 semantic_clusters_from: bert  # "bert" to use pre-computed BERT embeddings, "tfidf" to compute TF-IDF vectors
 semantic_n_clusters: 30  # Number of semantic clusters (K)
-semantic_text_column: title  # Which text to use: title, body, or subtitle (for TF-IDF mode)
+clustering_algorithm: "kmeans++"  # "kmeans++" for k-means++ initialization, "random" for random init
+semantic_text_column: body  # Which text to use: title, body, or subtitle (for TF-IDF mode)
 use_weighted_cluster_features: true  # Whether to use weighted features based on cluster distances
 
 lgbm:

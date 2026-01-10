@@ -36,8 +36,8 @@ def create_features(ctx, debug=False, exp=None):
         "features/u_stat_history/run.py",
         "features/u_click_article_stat_v2/run.py",
         "features/y_transition_prob_from_first/run.py",
-        "features/c_appear_imp_count_v7/run.py",                          # problematic
-        "features/c_appear_imp_count_read_time_per_inview_v7/run.py",     # problematic
+        "features/c_appear_imp_count_v7/run.py",                          
+        "features/c_appear_imp_count_read_time_per_inview_v7/run.py",    
         "features/c_topics_sim_count_svd/run.py",
         "features/c_title_tfidf_svd_sim/run.py",
         "features/c_subtitle_tfidf_svd_sim/run.py",

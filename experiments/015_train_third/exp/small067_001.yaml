@@ -18,7 +18,8 @@ graph_workers: 4
 use_semantic_clusters: true  # Enable semantic cluster features
 semantic_clusters_from: bert  # "bert" to use pre-computed BERT embeddings, "tfidf" to compute TF-IDF vectors
 semantic_n_clusters: 30  # Number of semantic clusters (K)
-semantic_text_column: title  # Which text to use: title, body, or subtitle (for TF-IDF mode)
+clustering_algorithm: "kmeans++"  # "kmeans++" for k-means++ initialization, "random" for random init
+semantic_text_column: body  # Which text to use: title, body, or subtitle (for TF-IDF mode)
 use_weighted_cluster_features: true  # Whether to use weighted features based on cluster distances
 
 lgbm:

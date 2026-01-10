@@ -44,6 +44,7 @@ class SemanticClusterFeatureExtractor:
         bert_embeddings_path: Optional[str] = None,
         max_tfidf_features: int = 5000,
         use_weighted_cluster_features: bool = False,
+        clustering_algorithm: str = "kmeans++",  # "kmeans++" or "random"
     ):
         """
         Initialize Semantic Cluster Feature Extractor.
@@ -54,12 +55,23 @@ class SemanticClusterFeatureExtractor:
             mode: "bert" to use pre-computed BERT embeddings, "tfidf" to use TF-IDF
             bert_embeddings_path: Path to pre-computed BERT embeddings parquet file (for BERT mode)
             max_tfidf_features: Maximum number of TF-IDF features (for TF-IDF mode)
+            clustering_algorithm: "kmeans++" for k-means++ initialization, "random" for random initialization
         """
         self.n_clusters = n_clusters
         self.random_state = random_state
         self.mode = mode.lower()
         self.bert_embeddings_path = bert_embeddings_path or "input/google_bert_base_multilingual_cased/bert_base_multilingual_cased.parquet"
         self.max_tfidf_features = max_tfidf_features
+        
+        # Map clustering algorithm name to sklearn init parameter
+        algo_lower = clustering_algorithm.lower().replace("-", "")
+        if algo_lower in ["kmeans++", "kmeanspp"]:
+            self.clustering_init = "k-means++"
+        elif algo_lower in ["kmeans", "random"]:
+            self.clustering_init = "random"
+        else:
+            print(f"Warning: Unknown clustering_algorithm '{clustering_algorithm}', defaulting to 'k-means++'")
+            self.clustering_init = "k-means++"
         
         self.kmeans = None
         self.article_clusters = {}  # article_id -> cluster_id
@@ -114,9 +126,10 @@ class SemanticClusterFeatureExtractor:
         article_vectors = normalize(article_vectors, norm='l2')
         
         # K-Means clustering
-        print(f"Running K-Means clustering (K={self.n_clusters})...")
+        print(f"Running K-Means clustering (K={self.n_clusters}, init={self.clustering_init})...")
         self.kmeans = MiniBatchKMeans(
             n_clusters=self.n_clusters,
+            init=self.clustering_init,
             random_state=self.random_state,
             batch_size=1024,
             n_init=10,
@@ -459,6 +472,7 @@ class SemanticClusterFeatureExtractor:
             'max_tfidf_features': self.max_tfidf_features,
             'embedding_dim': self.embedding_dim,
             'use_weighted_cluster_features': self.use_weighted_cluster_features,
+            'clustering_init': self.clustering_init,
         }
         with open(save_path / "config.pkl", "wb") as f:
             pickle.dump(config, f)
@@ -478,6 +492,7 @@ class SemanticClusterFeatureExtractor:
         self.max_tfidf_features = config.get('max_tfidf_features', 5000)
         self.embedding_dim = config.get('embedding_dim', 768)
         self.use_weighted_cluster_features = config.get('use_weighted_cluster_features', False)
+        self.clustering_init = config.get('clustering_init', 'k-means++')  # Default to k-means++
         
         # Load kmeans, article clusters, and embeddings cache
         with open(load_path / "kmeans.pkl", "rb") as f:
